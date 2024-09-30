@@ -899,7 +899,7 @@ function simulate() {
     var gravityMagnitude;
     if (useSinusoidalGravity) {
         var amplitude = -20;   // Amplitude of the sinusoidal function
-        var frequency = 1;   // Frequency in Hz
+        var frequency = 10;   // Frequency in Hz
         gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) + 0.5 * amplitude;
     } else {
         gravityMagnitude = gravityConstant; // Constant gravity

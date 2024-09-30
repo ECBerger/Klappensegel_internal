@@ -39,7 +39,7 @@
     <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
     </script>
     <script>        
-        // ----- math on vector arrays -------------------------------------------------------------
+    // ----- math on vector arrays -------------------------------------------------------------
 
 function vecSetZero(a,anr) {
     anr *= 3;
@@ -498,13 +498,87 @@ class Cloth {
 
         this.temp = new Float32Array(4 * 3);
         this.grads = new Float32Array(4 * 3);
-
     
         this.grabId = -1;
         this.grabInvMass = 0.0;
 
         this.fixedVertices = fixedVertices;
         this.initPhysics(mesh.faceTriIds);
+
+        // Fixed points (anchors) for the papillary muscles
+        this.cordAnchors = [
+            new THREE.Vector3(10.0, 105.0, 3.476813162706094e-06),
+            new THREE.Vector3(9.807853698730469, 105.0, 1.9509083032608032),
+            new THREE.Vector3(5.555702209472656, 105.0, -8.314693450927734),
+            new THREE.Vector3(1.9509048461914062, 105.0, -9.807849884033203),
+            new THREE.Vector3(3.8268356323242188, 105.0, -9.238788604736328),
+            new THREE.Vector3(7.071067810058594, 105.0, -7.071064472198486),
+            new THREE.Vector3(8.314697265625, 105.0, -5.555698871612549),
+            new THREE.Vector3(9.238792419433594, 105.0, -3.8268320560455322),
+            new THREE.Vector3(9.807853698730469, 105.0, -1.9509013891220093),
+            new THREE.Vector3(9.238792419433594, 105.0, 3.8268392086029053),
+            new THREE.Vector3(0.0, 105.0, 9.999996185302734),
+            new THREE.Vector3(1.9509048461914062, 105.0, 9.807857513427734),
+            new THREE.Vector3(-3.8268356323242188, 105.0, 9.23879623413086),
+            new THREE.Vector3(-5.555702209472656, 105.0, 8.314693450927734),
+            new THREE.Vector3(3.8268356323242188, 105.0, 9.23879623413086),
+            new THREE.Vector3(-1.9509048461914062, 105.0, 9.807857513427734),
+            new THREE.Vector3(8.314697265625, 105.0, 5.555705547332764),
+            new THREE.Vector3(7.071067810058594, 105.0, 7.071071147918701),
+            new THREE.Vector3(5.555702209472656, 105.0, 8.314693450927734),
+            new THREE.Vector3(-5.7402496337890625, 105.0, 13.858196258544922),
+            new THREE.Vector3(-2.9263534545898438, 105.0, 14.711788177490234),
+            new THREE.Vector3(0.0, 105.0, 14.999996185302734),
+            new THREE.Vector3(2.9263534545898438, 105.0, 14.711788177490234),
+            new THREE.Vector3(8.33355712890625, 105.0, 12.472042083740234),
+            new THREE.Vector3(13.858192443847656, 105.0, 5.74025297164917),
+            new THREE.Vector3(15.0, 105.0, 3.476813162706094e-06),
+            new THREE.Vector3(12.4720458984375, 105.0, -8.333545684814453),
+            new THREE.Vector3(8.33355712890625, 105.0, -12.472042083740234),
+            new THREE.Vector3(2.9263534545898438, 105.0, -14.711772918701172),
+        ];
+        
+        this.meshPoints = [
+            new THREE.Vector3(18.43963623046875, 115.37950897216797, -2.5671119689941406),
+            new THREE.Vector3(18.849258422851562, 116.5769271850586, 3.1053736209869385),
+            new THREE.Vector3(13.893844604492188, 119.29920196533203, -21.529010772705078),
+            new THREE.Vector3(5.584556579589844, 120.93396759033203, -31.138385772705078),
+            new THREE.Vector3(9.759597778320312, 118.50547790527344, -26.610851287841797),
+            new THREE.Vector3(15.403411865234375, 119.59097290039062, -18.831226348876953),
+            new THREE.Vector3(16.972312927246094, 118.29377746582031, -13.385822296142578),
+            new THREE.Vector3(17.578887939453125, 116.10016632080078, -8.171955108642578),
+            new THREE.Vector3(17.968551635742188, 115.4803237915039, -5.410572052001953),
+            new THREE.Vector3(18.171737670898438, 117.6713638305664, 5.736919403076172),
+            new THREE.Vector3(-2.7476806640625, 127.55111694335938, 25.650890350341797),
+            new THREE.Vector3(1.924530029296875, 126.52765655517578, 22.822811126708984),
+            new THREE.Vector3(-10.666183471679688, 124.57829284667969, 26.132823944091797),
+            new THREE.Vector3(-15.733230590820312, 121.9059066772461, 24.206035614013672),
+            new THREE.Vector3(5.596824645996094, 124.80231475830078, 19.101726531982422),
+            new THREE.Vector3(-8.1502685546875, 126.08170318603516, 26.528087615966797),
+            new THREE.Vector3(14.784210205078125, 119.98833465576172, 9.793025970458984),
+            new THREE.Vector3(10.755401611328125, 122.07196044921875, 13.19851303100586),
+            new THREE.Vector3(7.240943908691406, 123.91021728515625, 17.081462860107422),
+            new THREE.Vector3(-11.151466369628906, 138.10520935058594, 24.20661735534668),
+            new THREE.Vector3(-5.943870544433594, 136.26954650878906, 25.32295036315918),
+            new THREE.Vector3(-0.46230316162109375, 135.47337341308594, 23.782773971557617),
+            new THREE.Vector3(4.46282958984375, 134.60675048828125, 20.484296798706055),
+            new THREE.Vector3(11.590568542480469, 126.74313354492188, 13.532483100891113),
+            new THREE.Vector3(16.50537109375, 123.81207275390625, 6.04020357131958),
+            new THREE.Vector3(18.92437744140625, 125.92546081542969, -5.66621732711792),
+            new THREE.Vector3(16.188858032226562, 126.06763458251953, -18.009464263916016),
+            new THREE.Vector3(11.750747680664062, 128.40870666503906, -28.048267364501953),
+            new THREE.Vector3(6.2244415283203125, 129.95921325683594, -34.354190826416016),
+        ];        
+
+        this.cordConstraints = []; // To be populated
+        this.cordRestLengths = []; // To store the resting lengths of the cords
+
+        // Automatically populate the cordConstraints array
+        this.populateCordConstraints();
+
+        // Add a group to hold chordae lines
+        this.cordLinesGroup = new THREE.Group();
+        scene.add(this.cordLinesGroup);  // Add the group to the scene
 
         // visual edge mesh
 
@@ -534,6 +608,16 @@ class Cloth {
         this.backMesh.layers.enable(1);
         scene.add(this.backMesh);
         geometry.computeVertexNormals();
+
+        // Create a line for each cord
+        this.cordLines = [];
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+            const material = new THREE.LineBasicMaterial({ color: 0xff0000 });  // Red color for the cords
+            const line = new THREE.Line(geometry, material);
+            this.cordLinesGroup.add(line);  // Add the line to the group
+            this.cordLines.push(line);  // Store it for updating later
+        }
         
         this.updateMeshes();
 
@@ -541,7 +625,53 @@ class Cloth {
 
         // Initialize the hash with appropriate spacing and particle count
         this.hash = new Hash(4 * this.selfCollideDist, this.numParticles); 
-     }
+    }
+
+    // Method to find the closest vertex for each cord mesh point
+    populateCordConstraints() {
+        const vertexCount = this.pos.length / 3; // Number of vertices in the mesh
+
+        for (let i = 0; i < this.meshPoints.length; i++) {
+            const meshPoint = this.meshPoints[i];
+            const fixedAnchor = this.cordAnchors[i];
+
+            let closestVertexIndex = -1;
+            let minDistance = Infinity;
+
+            // Iterate through all vertices to find the closest one to this mesh point
+            for (let j = 0; j < vertexCount; j++) {
+                const vertexPos = new THREE.Vector3(
+                    this.pos[j * 3],
+                    this.pos[j * 3 + 1],
+                    this.pos[j * 3 + 2]
+                );
+
+                const distance = vertexPos.distanceTo(meshPoint);
+
+                // Update closest vertex if this one is nearer
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestVertexIndex = j;
+                }
+            }
+
+            // After finding the closest vertex, add it to the constraints array
+            if (closestVertexIndex >= 0) {
+                // Calculate the initial/resting length
+                const initialDistance = fixedAnchor.distanceTo(meshPoint);
+                
+                // Store the constraint and its corresponding rest length
+                this.cordConstraints.push({
+                    clothVertexIndex: closestVertexIndex,
+                    anchor: fixedAnchor
+                });
+                
+                // Store the resting length for this cord
+                this.cordRestLengths.push(initialDistance);
+            }
+        }
+    }
+
 
     // Add a method to handle self-collision constraints using spatial hashing
     solveSelfCollisions() {
@@ -673,7 +803,8 @@ class Cloth {
     {
         this.solveStretching(this.stretchingCompliance, dt);
         this.solveBending(this.bendingCompliance, dt);
-        this.solveSelfCollisions(); // Add this line to include self-collision
+        this.solveSelfCollisions();
+        this.applyCordForces(dt);
     }
 
     postSolve(dt)
@@ -736,12 +867,63 @@ class Cloth {
         }
     }
 
+    applyCordForces(dt) {
+        const kSpring = 1.0e3; // Spring stiffness constant
+
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const { clothVertexIndex, anchor } = this.cordConstraints[i];
+            const restLength = this.cordRestLengths[i]; // Get the resting length for this cord
+
+            const clothPos = new THREE.Vector3(
+                this.pos[clothVertexIndex * 3],
+                this.pos[clothVertexIndex * 3 + 1],
+                this.pos[clothVertexIndex * 3 + 2]
+            );
+
+            const diff = new THREE.Vector3().subVectors(anchor, clothPos);
+            const dist = diff.length();
+            const restoringForce = diff.normalize().multiplyScalar(kSpring * (dist - restLength));
+
+            // Apply force to the vertex (assuming invMass is non-zero)
+            if (this.invMass[clothVertexIndex] > 0) {
+                this.vel[clothVertexIndex * 3] += restoringForce.x * dt;
+                this.vel[clothVertexIndex * 3 + 1] += restoringForce.y * dt;
+                this.vel[clothVertexIndex * 3 + 2] += restoringForce.z * dt;
+            }
+        }
+    }
+
     updateMeshes() {
         this.triMesh.geometry.computeVertexNormals();
         this.triMesh.geometry.attributes.position.needsUpdate = true;
         this.triMesh.geometry.computeBoundingSphere();
 
         this.edgeMesh.geometry.attributes.position.needsUpdate = true;
+
+        // Update chordae lines
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const { clothVertexIndex, anchor } = this.cordConstraints[i];
+
+        // Get the position of the cloth vertex
+        const clothPos = new THREE.Vector3(
+            this.pos[clothVertexIndex * 3],
+            this.pos[clothVertexIndex * 3 + 1],
+            this.pos[clothVertexIndex * 3 + 2]
+        );
+
+        // Update the line's positions
+        const line = this.cordLines[i];
+        const positions = line.geometry.attributes.position.array;
+        positions[0] = clothPos.x;
+        positions[1] = clothPos.y;
+        positions[2] = clothPos.z;
+        positions[3] = anchor.x;
+        positions[4] = anchor.y;
+        positions[5] = anchor.z;
+
+        line.geometry.attributes.position.needsUpdate = true;  // Flag for updating the line geometry
+    }
+
     }
 
     endFrame() 
@@ -794,44 +976,44 @@ function initPhysics()
     var mesh = meshes[0];
     var fixedVertices = [
         [35.8489990234375, 165.5010986328125, 8.134994506835938],
-[33.99046325683594, 165.84524536132812, 12.461029052734375],
-[31.88287353515625, 165.98385620117188, 16.668365478515625],
-[29.40631103515625, 165.93580627441406, 20.63519287109375],
-[26.611083984375, 165.83563232421875, 24.328033447265625],
-[23.52923583984375, 165.61215209960938, 27.711578369140625],
-[20.143173217773438, 165.1524658203125, 30.689239501953125],
-[16.474853515625, 164.6180419921875, 33.22015380859375],
-[12.570831298828125, 164.12294006347656, 35.30351257324219],
-[8.477310180664062, 163.44752502441406, 36.839813232421875],
-[4.29791259765625, 162.59423828125, 37.92010498046875],
-[0.10736083984375, 161.57540893554688, 38.66584777832031],
-[-4.0267791748046875, 160.29327392578125, 39.07496643066406],
-[-8.085868835449219, 158.85447692871094, 39.15704345703125],
-[-12.06256103515625, 157.37939453125, 38.89923095703125],
-[-15.876419067382812, 155.81271362304688, 38.29374694824219],
-[-19.431175231933594, 154.11854553222656, 37.321014404296875],
-[-22.736083984375, 152.45375061035156, 36.05149841308594],
-[-28.613311767578125, 149.62283325195312, 32.89787292480469],
-[-30.891647338867188, 148.10044860839844, 31.092071533203125],
-[-34.472007751464844, 147.7112274169922, 27.887130737304688],
-[-37.037498474121094, 147.28842163085938, 24.834213256835938],
-[-39.224853515625, 147.3048858642578, 21.5540771484375],
-[-40.204620361328125, 146.58941650390625, 19.214019775390625],
-[-40.87794494628906, 147.93304443359375, 18.13885498046875],
-[-42.02738952636719, 148.8717498779297, 14.711761474609375],
-[-42.75379180908203, 149.9862823486328, 11.340301513671875],
-[-43.184783935546875, 151.21307373046875, 8.06146240234375],
-[-43.411903381347656, 152.5615997314453, 4.8942718505859375],
-[-43.47880554199219, 154.05404663085938, 1.8471832275390625],
-[-43.38592529296875, 155.67588806152344, -1.0899124145507812],
-[-43.103981018066406, 157.3496856689453, -3.9592742919921875],
-[-42.64440155029297, 158.9791259765625, -6.816444396972656],
-[-42.03791046142578, 160.50979614257812, -9.692619323730469],
-[-41.331939697265625, 161.94300842285156, -12.59088134765625],
-[-40.570526123046875, 163.28118896484375, -15.514900207519531],
-[-39.78144073486328, 164.31710815429688, -18.544410705566406],
-[-38.93907928466797, 164.69876098632812, -21.69805145263672],
-[-37.940574645996094, 164.34310913085938, -24.791259765625],
+        [33.99046325683594, 165.84524536132812, 12.461029052734375],
+        [31.88287353515625, 165.98385620117188, 16.668365478515625],
+        [29.40631103515625, 165.93580627441406, 20.63519287109375],
+        [26.611083984375, 165.83563232421875, 24.328033447265625],
+        [23.52923583984375, 165.61215209960938, 27.711578369140625],
+        [20.143173217773438, 165.1524658203125, 30.689239501953125],
+        [16.474853515625, 164.6180419921875, 33.22015380859375],
+        [12.570831298828125, 164.12294006347656, 35.30351257324219],
+        [8.477310180664062, 163.44752502441406, 36.839813232421875],
+        [4.29791259765625, 162.59423828125, 37.92010498046875],
+        [0.10736083984375, 161.57540893554688, 38.66584777832031],
+        [-4.0267791748046875, 160.29327392578125, 39.07496643066406],
+        [-8.085868835449219, 158.85447692871094, 39.15704345703125],
+        [-12.06256103515625, 157.37939453125, 38.89923095703125],
+        [-15.876419067382812, 155.81271362304688, 38.29374694824219],
+        [-19.431175231933594, 154.11854553222656, 37.321014404296875],
+        [-22.736083984375, 152.45375061035156, 36.05149841308594],
+        [-28.613311767578125, 149.62283325195312, 32.89787292480469],
+        [-30.891647338867188, 148.10044860839844, 31.092071533203125],
+        [-34.472007751464844, 147.7112274169922, 27.887130737304688],
+        [-37.037498474121094, 147.28842163085938, 24.834213256835938],
+        [-39.224853515625, 147.3048858642578, 21.5540771484375],
+        [-40.204620361328125, 146.58941650390625, 19.214019775390625],
+        [-40.87794494628906, 147.93304443359375, 18.13885498046875],
+        [-42.02738952636719, 148.8717498779297, 14.711761474609375],
+        [-42.75379180908203, 149.9862823486328, 11.340301513671875],
+        [-43.184783935546875, 151.21307373046875, 8.06146240234375],
+        [-43.411903381347656, 152.5615997314453, 4.8942718505859375],
+        [-43.47880554199219, 154.05404663085938, 1.8471832275390625],
+        [-43.38592529296875, 155.67588806152344, -1.0899124145507812],
+        [-43.103981018066406, 157.3496856689453, -3.9592742919921875],
+        [-42.64440155029297, 158.9791259765625, -6.816444396972656],
+        [-42.03791046142578, 160.50979614257812, -9.692619323730469],
+        [-41.331939697265625, 161.94300842285156, -12.59088134765625],
+        [-40.570526123046875, 163.28118896484375, -15.514900207519531],
+        [-39.78144073486328, 164.31710815429688, -18.544410705566406],
+        [-38.93907928466797, 164.69876098632812, -21.69805145263672],
+        [-37.940574645996094, 164.34310913085938, -24.791259765625],
         [-36.670806884765625, 163.08273315429688, -27.500961303710938],
         [-35.28118133544922, 161.12246704101562, -29.645545959472656],
         [-34.04225158691406, 158.7398223876953, -31.372879028320312],
@@ -899,7 +1081,7 @@ function simulate() {
     var gravityMagnitude;
     if (useSinusoidalGravity) {
         var amplitude = -20;   // Amplitude of the sinusoidal function
-        var frequency = 10;   // Frequency in Hz
+        var frequency = 5;   // Frequency in Hz
         gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) + 0.5 * amplitude;
     } else {
         gravityMagnitude = gravityConstant; // Constant gravity

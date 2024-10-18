@@ -25,9 +25,10 @@
     <button type="button" id="buttonRun" class="button">Run</button>
     <button type="button" id="buttonRestart" class="button">Restart</button>
     <button type="button" id="buttonExport" class="button disabled" disabled>Export</button>
-    <input title='checkboxEdges' id="checkboxEdges" type="checkbox" value="0"> Show Mesh&nbsp;&nbsp;
-    <input title='checkboxGravity' id="checkboxGravity" type="checkbox"> Simulate Pulsatile Flow&nbsp;&nbsp;
-    <input title='checkboxFixed' id="checkboxFixedVertices" type="checkbox" value="0"> Exclude Fixed Vertices from Mouse Interaction</p>
+    <input title='checkboxEdges' id="checkboxEdges" type="checkbox" value="1"> Hide Mesh&nbsp;&nbsp;
+    <input title='checkboxGravity' id="checkboxGravity" type="checkbox" value="0"> Simulate Pulsatile Flow&nbsp;&nbsp;
+    <input title='checkboxBoundingSpheres' id="checkboxBoundingSpheres" type="checkbox" value="1"> Hide Bounding Spheres&nbsp;&nbsp;
+    <input title='checkboxCollisions' id="checkboxShowCollisions" type="checkbox" value="0"> Show Collisions</p>
     <span id="numTris">0</span> tris&nbsp;&nbsp;
     <span id="numVerts">0</span> verts&nbsp;&nbsp;
     <span id="ms">0.000</span> ms per frame&nbsp;&nbsp;
@@ -138,6 +139,24 @@ function onShowEdges()
 // Function to handle checkbox change
 function onGravityCheckboxChange() {
     useSinusoidalGravity = document.getElementById('checkboxGravity').checked;
+}
+
+// ------------------------------------------------------------------
+// Function to handle Collision checkbox change
+function toggleCollisionVisualization() {
+    Cloth.showCollisions = !Cloth.showCollisions;
+}
+
+function toggleBoundingSpheresVisibility() {
+    const showBoundingSpheres = document.getElementById('checkboxBoundingSpheres').checked;
+    for (let i = 0; i < gPhysicsScene.objects.length; i++) {
+        const object = gPhysicsScene.objects[i];
+        if (object.boundingSpheres) {
+            for (let j = 0; j < object.boundingSpheres.length; j++) {
+                object.boundingSpheres[j].visible = !showBoundingSpheres;
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------
@@ -462,6 +481,9 @@ class Cloth {
         var edgeIds = [];
         var triPairIds = [];
 
+        // Initialize the hash with appropriate spacing and particle count (Move this up)
+        this.hash = new Hash(10 * this.selfCollideDist, mesh.vertices.length / 3); 
+
         for (var i = 0; i < numTris; i++) {
             for (var j = 0; j < 3; j++) {
                 var id0 = mesh.faceTriIds[3 * i + j];
@@ -576,12 +598,18 @@ class Cloth {
         // Automatically populate the cordConstraints array
         this.populateCordConstraints();
 
+        // Bounding spheres radius (same as self-collision distance)
+        this.boundingSphereRadius = this.selfCollideDist * 1.5;
+
+        // Create visualization for bounding spheres
+        this.boundingSpheres = [];  // Array to store bounding spheres
+        this.createBoundingSpheres(scene);  // Initialize bounding spheres
+
         // Add a group to hold chordae lines
         this.cordLinesGroup = new THREE.Group();
         scene.add(this.cordLinesGroup);  // Add the group to the scene
 
         // visual edge mesh
-
         var geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
         geometry.setIndex(edgeIds);
@@ -622,9 +650,46 @@ class Cloth {
         this.updateMeshes();
 
         this.volIdOrder = [[1,3,2], [0,2,3], [0,3,1], [0,1,2]];
+    }
 
-        // Initialize the hash with appropriate spacing and particle count
-        this.hash = new Hash(4 * this.selfCollideDist, this.numParticles); 
+    // Method to remove existing bounding spheres from the scene
+    removeBoundingSpheres(scene) {
+        for (let i = 0; i < this.boundingSpheres.length; i++) {
+            scene.remove(this.boundingSpheres[i]);  // Remove sphere from the scene
+        }
+        this.boundingSpheres = [];  // Clear the bounding spheres array
+    }
+
+    // Method to create bounding sphere meshes for visualization
+    createBoundingSpheres(scene) {
+    // Remove any existing bounding spheres before creating new ones
+    this.removeBoundingSpheres(scene);
+
+    // Define the default material for bounding spheres
+    const sphereGeometry = new THREE.SphereGeometry(this.boundingSphereRadius, 16, 16);
+    const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });  // Green wireframe spheres
+
+    for (let i = 0; i < this.numParticles; i++) {
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone());  // Clone material for each sphere
+        const initialPosition = new THREE.Vector3(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+        sphere.position.copy(initialPosition);
+        scene.add(sphere);
+        this.boundingSpheres.push(sphere);  // Store reference to update later
+        }
+    }
+
+    updateBoundingSpheres(scene) {
+        // Reset sphere colors before checking for collisions
+        const defaultColor = new THREE.Color(0x00ff00);  // Default color (green)
+        const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
+    
+        for (let i = 0; i < this.boundingSpheres.length; i++) {
+            const sphere = this.boundingSpheres[i];
+            sphere.position.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+    
+            // Reset to default color before collision detection
+            sphere.material.color = defaultColor.clone();
+        }
     }
 
     // Method to find the closest vertex for each cord mesh point
@@ -672,54 +737,47 @@ class Cloth {
         }
     }
 
-    // Add a method to handle self-collision constraints using spatial hashing
+    // Full mesh self-collision detection using bounding spheres
     solveSelfCollisions() {
-        this.hash.create(this.pos); // Update the spatial hash table
-        var selfCollideDist2 = this.selfCollideDist * this.selfCollideDist;
-        var repulsionFactor = 1; // Adjust repulsion factor for stability
-        var dampingFactor = 0.1; // Adjust damping factor for stability
+        this.hash.create(this.pos);  // Update spatial hash table with new positions
+        const boundingSphereRadius2 = this.boundingSphereRadius * this.boundingSphereRadius;
 
-    
-        for (var i = 0; i < this.numParticles; i++) {
-            if (this.invMass[i] === 0.0) continue; // Skip static particles
-    
-            var particleId = i;
-            this.hash.query(this.pos, particleId, this.selfCollideDist); // Query hash table
-    
-            for (var j = 0; j < this.hash.querySize; j++) {
-                var otherId = this.hash.queryIds[j];
-                if (particleId >= otherId) continue; // Avoid double-checking
-                if (this.invMass[otherId] === 0.0) continue; // Skip static particles
-    
-                var distSquared = vecDistSquared(this.pos, particleId, this.pos, otherId);
-                if (distSquared >= selfCollideDist2) continue; // Check distance, include edge case
-    
-                var dist = Math.sqrt(distSquared);
-                var overlap = this.selfCollideDist - dist;
-                var invMassSum = this.invMass[particleId] + this.invMass[otherId];
+        const defaultColor = new THREE.Color(0x00ff00);  // Default color (green)
+        const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
+
+        // Loop through all particles and resolve collisions with neighbors
+        for (let i = 0; i < this.numParticles; i++) {
+            if (this.invMass[i] === 0.0) continue; // Skip fixed vertices
+
+            // Query neighbors within the bounding sphere's radius using the spatial hash
+            this.hash.query(this.pos, i, this.boundingSphereRadius);
+
+            for (let j = 0; j < this.hash.querySize; j++) {
+                let otherId = this.hash.queryIds[j];
+                if (i >= otherId) continue; // Avoid double-counting collisions
+
+                // Compute distance between the two particles
+                const distSquared = vecDistSquared(this.pos, i, this.pos, otherId);
+                if (distSquared >= boundingSphereRadius2) continue;  // No collision
+
+                // Collision detected: Resolve overlap by applying position correction
+                const dist = Math.sqrt(distSquared);
+                const overlap = this.boundingSphereRadius - dist;
+                const invMassSum = this.invMass[i] + this.invMass[otherId];
                 
-                if (invMassSum === 0.0) continue; // Avoid division by zero
-    
-                // Avoid division by very small numbers
-                var safeDist = Math.max(dist, 1e-3);
-                vecSetDiff(this.grads, 0, this.pos, particleId, this.pos, otherId);
-                vecScale(this.grads, 0, repulsionFactor * overlap / safeDist);
-    
-                // Apply position correction
-                vecAdd(this.pos, particleId, this.grads, 0, -this.invMass[particleId] / invMassSum);
-                vecAdd(this.pos, otherId, this.grads, 0, this.invMass[otherId] / invMassSum);
-    
-                // Calculate relative velocities for damping
-                vecSetDiff(this.grads, 1, this.vel, particleId, this.vel, otherId);
-                var relativeNormalVelocity = vecDot(this.grads, 0, this.grads, 1);
+                if (invMassSum === 0.0) continue;  // If both particles are fixed, skip
+                
+                // Calculate correction direction (normalized difference between positions)
+                vecSetDiff(this.grads, 0, this.pos, i, this.pos, otherId);
+                vecScale(this.grads, 0, overlap / dist);  // Scale by the overlap to resolve collision
 
-                // Apply damping to the relative velocity
-                var dampingImpulse = dampingFactor * relativeNormalVelocity / invMassSum;
-                vecScale(this.grads, 0, dampingImpulse);
+                // Apply position correction proportionally to the inverse masses
+                vecAdd(this.pos, i, this.grads, 0, this.invMass[i] / invMassSum);
+                vecAdd(this.pos, otherId, this.grads, 0, -this.invMass[otherId] / invMassSum);
 
-                // Update velocities
-                vecAdd(this.vel, particleId, this.grads, 0, -this.invMass[particleId]);
-                vecAdd(this.vel, otherId, this.grads, 0, this.invMass[otherId]);
+                // Collision detected: Set collision color
+                this.boundingSpheres[i].material.color = collisionColor.clone();
+                this.boundingSpheres[otherId].material.color = collisionColor.clone();
             }
         }
     }
@@ -864,9 +922,9 @@ class Cloth {
             vecAdd(this.pos,id1, this.grads,0, -s * w1);
         }
     }
-    
+
     applyCordForces(dt) {
-        const kSpring = 1.0e3; // Spring stiffness constant
+        const kSpring = 1.0; // Spring stiffness constant
         const stretchLimitFactor = 1.1; // Allow stretch up to 110%
     
         for (let i = 0; i < this.cordConstraints.length; i++) {
@@ -903,15 +961,16 @@ class Cloth {
                 }
             }
         }
-    }
-    
+    }       
 
     updateMeshes() {
         this.triMesh.geometry.computeVertexNormals();
         this.triMesh.geometry.attributes.position.needsUpdate = true;
         this.triMesh.geometry.computeBoundingSphere();
-
         this.edgeMesh.geometry.attributes.position.needsUpdate = true;
+
+        // Update bounding spheres positions
+        this.updateBoundingSpheres();
 
         // Update chordae lines
         for (let i = 0; i < this.cordConstraints.length; i++) {
@@ -1093,8 +1152,8 @@ function simulate() {
     // Determine the gravity magnitude based on the checkboxGravity state
     var gravityMagnitude;
     if (useSinusoidalGravity) {
-        var amplitude = -20;   // Amplitude of the sinusoidal function
-        var frequency = 5;   // Frequency in Hz
+        var amplitude = 60;   // Amplitude of the sinusoidal function
+        var frequency = 1;   // Frequency in Hz
         gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) + 0.5 * amplitude;
     } else {
         gravityMagnitude = gravityConstant; // Constant gravity

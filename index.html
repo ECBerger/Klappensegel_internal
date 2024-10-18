@@ -1441,6 +1441,10 @@ document.getElementById('checkboxGravity').addEventListener('change', function()
     onGravityCheckboxChange()
 });
 
+document.getElementById('checkboxBoundingSphere').addEventListener('click', () => {
+    onShowBoundingSphere();
+});
+
 // make browser to call us repeatedly -----------------------------------
 
 function update() {

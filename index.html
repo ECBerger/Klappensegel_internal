@@ -568,7 +568,7 @@ class Cloth {
             new THREE.Vector3(16.188858032226562, 126.06763458251953, -18.009464263916016),
             new THREE.Vector3(11.750747680664062, 128.40870666503906, -28.048267364501953),
             new THREE.Vector3(6.2244415283203125, 129.95921325683594, -34.354190826416016),
-        ];        
+        ];           
 
         this.cordConstraints = []; // To be populated
         this.cordRestLengths = []; // To store the resting lengths of the cords
@@ -672,7 +672,6 @@ class Cloth {
         }
     }
 
-
     // Add a method to handle self-collision constraints using spatial hashing
     solveSelfCollisions() {
         this.hash.create(this.pos); // Update the spatial hash table
@@ -725,7 +724,6 @@ class Cloth {
         }
     }
     
-
     initPhysics(triIds) 
     {
         this.invMass.fill(0.0);
@@ -866,32 +864,47 @@ class Cloth {
             vecAdd(this.pos,id1, this.grads,0, -s * w1);
         }
     }
-
+    
     applyCordForces(dt) {
         const kSpring = 1.0e3; // Spring stiffness constant
-
+        const stretchLimitFactor = 1.1; // Allow stretch up to 110%
+    
         for (let i = 0; i < this.cordConstraints.length; i++) {
             const { clothVertexIndex, anchor } = this.cordConstraints[i];
             const restLength = this.cordRestLengths[i]; // Get the resting length for this cord
-
+    
             const clothPos = new THREE.Vector3(
                 this.pos[clothVertexIndex * 3],
                 this.pos[clothVertexIndex * 3 + 1],
                 this.pos[clothVertexIndex * 3 + 2]
             );
-
+    
             const diff = new THREE.Vector3().subVectors(anchor, clothPos);
             const dist = diff.length();
-            const restoringForce = diff.normalize().multiplyScalar(kSpring * (dist - restLength));
-
-            // Apply force to the vertex (assuming invMass is non-zero)
-            if (this.invMass[clothVertexIndex] > 0) {
-                this.vel[clothVertexIndex * 3] += restoringForce.x * dt;
-                this.vel[clothVertexIndex * 3 + 1] += restoringForce.y * dt;
-                this.vel[clothVertexIndex * 3 + 2] += restoringForce.z * dt;
+            const maxStretchLength = restLength * stretchLimitFactor; // Maximum allowed stretch
+    
+            if (dist > maxStretchLength) {
+                // The cord has stretched beyond the allowable limit, apply constraint
+                const correction = diff.normalize().multiplyScalar(dist - maxStretchLength);
+                if (this.invMass[clothVertexIndex] > 0) {
+                    // Move the vertex back to the maximum stretch length position
+                    this.pos[clothVertexIndex * 3] += correction.x;
+                    this.pos[clothVertexIndex * 3 + 1] += correction.y;
+                    this.pos[clothVertexIndex * 3 + 2] += correction.z;
+                }
+            } else {
+                // The cord is within the allowable stretch/compression range, apply regular forces
+                const restoringForce = diff.normalize().multiplyScalar(kSpring * (dist - restLength));
+    
+                if (this.invMass[clothVertexIndex] > 0) {
+                    this.vel[clothVertexIndex * 3] += restoringForce.x * dt;
+                    this.vel[clothVertexIndex * 3 + 1] += restoringForce.y * dt;
+                    this.vel[clothVertexIndex * 3 + 2] += restoringForce.z * dt;
+                }
             }
         }
     }
+    
 
     updateMeshes() {
         this.triMesh.geometry.computeVertexNormals();

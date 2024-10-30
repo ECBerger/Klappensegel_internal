@@ -70,6 +70,13 @@ function vecAdd(a,anr, b,bnr, scale = 1.0) {
     a[anr]   += b[bnr] * scale;
 }
 
+function vecSetSum(dst, dnr, a, anr, b, bnr, scale = 1.0) {
+    dnr *= 3; anr *= 3; bnr *= 3;
+    dst[dnr++] = (a[anr++] + b[bnr++]) * scale;
+    dst[dnr++] = (a[anr++] + b[bnr++]) * scale;
+    dst[dnr]   = (a[anr] + b[bnr]) * scale;
+}
+
 function vecSetDiff(dst,dnr, a,anr, b,bnr, scale = 1.0) {
     dnr *= 3; anr *= 3; bnr *= 3;
     dst[dnr++] = (a[anr++] - b[bnr++]) * scale;
@@ -118,8 +125,8 @@ var maxVelocity = 250.0;
 var gPhysicsScene = 
 {
     gravity : [0.0, gravityConstant, 0.0],
-    dt : 1.0 / 30.0,
-    numSubsteps : 30,
+    dt : 1.0 / 25.0,
+    numSubsteps : 20,
     paused: true,
     showEdges: false,
     objects: [],				
@@ -131,7 +138,6 @@ function onShowEdges()
     gPhysicsScene.showEdges = !gPhysicsScene.showEdges;
     for (var i = 0; i < gPhysicsScene.objects.length; i++) {
         gPhysicsScene.objects[i].edgeMesh.visible = gPhysicsScene.showEdges;
-        // gPhysicsScene.objects[i].triMesh.visible = !gPhysicsScene.showEdges;
     }
 }	
 
@@ -147,6 +153,8 @@ function toggleCollisionVisualization() {
     Cloth.showCollisions = !Cloth.showCollisions;
 }
 
+// ------------------------------------------------------------------
+// function to handle bounding sphere visibility checkbox change
 function toggleBoundingSpheresVisibility() {
     const showBoundingSpheres = document.getElementById('checkboxBoundingSpheres').checked;
     for (let i = 0; i < gPhysicsScene.objects.length; i++) {
@@ -253,7 +261,6 @@ function exportToSTL(geometry) {
     stl += 'endsolid exported\n';
     return stl;
 }
-
 
 // ------------------------------------------------------------------
 function saveSTLFile(stlString, filename = 'currentMesh.stl') {
@@ -463,7 +470,7 @@ class Hash {
 
 // ------------------------------------------------------------------
 class Cloth {
-    constructor(mesh, scene, fixedVertices, bendingCompliance = 0.00)
+    constructor(mesh, scene, fixedVertices, bendingCompliance = 0.05)
     {
         // Calculate a reasonable self-collision distance based on the mesh
         this.selfCollideDist = calculateSelfCollideDist(mesh); 
@@ -525,7 +532,14 @@ class Cloth {
         this.grabInvMass = 0.0;
 
         this.fixedVertices = fixedVertices;
-        this.initPhysics(mesh.faceTriIds);
+        this.initClothPhysics(mesh.faceTriIds);
+
+        // Bounding spheres radius (same as self-collision distance)
+        this.boundingSphereRadius = this.selfCollideDist * 1.5;
+
+        // Create visualization for bounding spheres
+        this.boundingSpheres = [];  // Array to store bounding spheres
+        this.createBoundingSpheres(scene);  // Initialize bounding spheres
 
         // Fixed points (anchors) for the papillary muscles
         this.cordAnchors = [
@@ -598,13 +612,6 @@ class Cloth {
         // Automatically populate the cordConstraints array
         this.populateCordConstraints();
 
-        // Bounding spheres radius (same as self-collision distance)
-        this.boundingSphereRadius = this.selfCollideDist * 1.5;
-
-        // Create visualization for bounding spheres
-        this.boundingSpheres = [];  // Array to store bounding spheres
-        this.createBoundingSpheres(scene);  // Initialize bounding spheres
-
         // Add a group to hold chordae lines
         this.cordLinesGroup = new THREE.Group();
         scene.add(this.cordLinesGroup);  // Add the group to the scene
@@ -613,7 +620,7 @@ class Cloth {
         var geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
         geometry.setIndex(edgeIds);
-        var lineMaterial = new THREE.LineBasicMaterial({color: 0x9767c7, linewidth: 2});
+        var lineMaterial = new THREE.LineBasicMaterial({color: 0x4C3B4D, linewidth: 100.0});
         // var lineMaterial = new THREE.MeshPhongMaterial({color: 0xff0000, side: THREE.DoubleSide});
         this.edgeMesh = new THREE.LineSegments(geometry, lineMaterial);
         this.edgeMesh.visible = true;
@@ -623,20 +630,21 @@ class Cloth {
         geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
         geometry.setIndex(mesh.faceTriIds);
-        var visMaterial = new THREE.MeshPhongMaterial({ color: 0x9767c7, side: THREE.FrontSide });
+        var visMaterial = new THREE.MeshPhongMaterial({ color: 0x4C3B4D, side: THREE.FrontSide });
         this.triMesh = new THREE.Mesh(geometry, visMaterial);
         this.triMesh.castShadow = true;
         this.triMesh.userData = this; // for raycasting
         this.triMesh.layers.enable(1);
         scene.add(this.triMesh);
         
-        var backMaterial = new THREE.MeshPhongMaterial({color: 0x5f417d, side: THREE.BackSide});
+        var backMaterial = new THREE.MeshPhongMaterial({color: 0x6A706E, side: THREE.BackSide});
         this.backMesh = new THREE.Mesh(geometry, backMaterial);
         this.backMesh.userData = this;	// for raycasting
         this.backMesh.layers.enable(1);
         scene.add(this.backMesh);
         geometry.computeVertexNormals();
 
+    
         // Create a line for each cord
         this.cordLines = [];
         for (let i = 0; i < this.cordConstraints.length; i++) {
@@ -646,18 +654,15 @@ class Cloth {
             this.cordLinesGroup.add(line);  // Add the line to the group
             this.cordLines.push(line);  // Store it for updating later
         }
-        
-        this.updateMeshes();
-
-        this.volIdOrder = [[1,3,2], [0,2,3], [0,3,1], [0,1,2]];
+        this.updateMeshes()
     }
 
     // Method to remove existing bounding spheres from the scene
     removeBoundingSpheres(scene) {
-        for (let i = 0; i < this.boundingSpheres.length; i++) {
-            scene.remove(this.boundingSpheres[i]);  // Remove sphere from the scene
+        while (this.boundingSpheres.length > 0) {
+            const sphere = this.boundingSpheres.pop(); // Remove from the array
+            scene.remove(sphere); // Also remove from the scene
         }
-        this.boundingSpheres = [];  // Clear the bounding spheres array
     }
 
     // Method to create bounding sphere meshes for visualization
@@ -666,8 +671,8 @@ class Cloth {
     this.removeBoundingSpheres(scene);
 
     // Define the default material for bounding spheres
-    const sphereGeometry = new THREE.SphereGeometry(this.boundingSphereRadius, 16, 16);
-    const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });  // Green wireframe spheres
+    const sphereGeometry = new THREE.SphereGeometry(this.boundingSphereRadius, 6, 6);
+    const sphereMaterial = new THREE.MeshBasicMaterial({ wireframe: false });  // spheres
 
     for (let i = 0; i < this.numParticles; i++) {
         const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone());  // Clone material for each sphere
@@ -678,9 +683,9 @@ class Cloth {
         }
     }
 
-    updateBoundingSpheres(scene) {
+    updateBoundingSpheres() {
         // Reset sphere colors before checking for collisions
-        const defaultColor = new THREE.Color(0x00ff00);  // Default color (green)
+        const defaultColor = new THREE.Color(0x82968C);  // Default color
         const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
     
         for (let i = 0; i < this.boundingSpheres.length; i++) {
@@ -742,7 +747,6 @@ class Cloth {
         this.hash.create(this.pos);  // Update spatial hash table with new positions
         const boundingSphereRadius2 = this.boundingSphereRadius * this.boundingSphereRadius;
 
-        const defaultColor = new THREE.Color(0x00ff00);  // Default color (green)
         const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
 
         // Loop through all particles and resolve collisions with neighbors
@@ -750,7 +754,7 @@ class Cloth {
             if (this.invMass[i] === 0.0) continue; // Skip fixed vertices
 
             // Query neighbors within the bounding sphere's radius using the spatial hash
-            this.hash.query(this.pos, i, this.boundingSphereRadius);
+            this.hash.query(this.pos, i, 3 * this.boundingSphereRadius);
 
             for (let j = 0; j < this.hash.querySize; j++) {
                 let otherId = this.hash.queryIds[j];
@@ -782,7 +786,7 @@ class Cloth {
         }
     }
     
-    initPhysics(triIds) 
+    initClothPhysics(triIds) 
     {
         this.invMass.fill(0.0);
 
@@ -820,7 +824,7 @@ class Cloth {
         }
 
         // Fix vertices based on input coordinates using tolerance
-        const tol = 0.5;
+        const tol = 0.3;
 
         for (var i = 0; i < this.numParticles; i++) {
             var x = this.pos[3 * i];
@@ -1153,7 +1157,7 @@ function simulate() {
     var gravityMagnitude;
     if (useSinusoidalGravity) {
         var amplitude = 60;   // Amplitude of the sinusoidal function
-        var frequency = 1;   // Frequency in Hz
+        var frequency = 1;   // Frequency 
         gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) + 0.5 * amplitude;
     } else {
         gravityMagnitude = gravityConstant; // Constant gravity
@@ -1170,8 +1174,9 @@ function simulate() {
         for (var i = 0; i < gPhysicsScene.objects.length; i++)
             gPhysicsScene.objects[i].preSolve(sdt, gPhysicsScene.gravity);
 
-        for (var i = 0; i < gPhysicsScene.objects.length; i++)
-            gPhysicsScene.objects[i].solve(sdt);
+        for (var i = 0; i < gPhysicsScene.objects.length; i++) {
+            gPhysicsScene.objects[i].solve(sdt);  // Use sdt as frameDt
+        }        
 
         for (var i = 0; i < gPhysicsScene.objects.length; i++)
             gPhysicsScene.objects[i].postSolve(sdt);
@@ -1191,19 +1196,16 @@ function simulate() {
         timeFrames = 0;
         timeSum = 0;
     }
-
-    document.getElementById("bendingCompliance").innerHTML = gPhysicsScene.objects[0].bendingCompliance;
 }
 
 // ------------------------------------------
-        
 function initThreeScene() 
 {
     gThreeScene = new THREE.Scene();
     
     // Lights
     
-    gThreeScene.add( new THREE.AmbientLight( 0xffffff, 1.0 ) );	
+    gThreeScene.add( new THREE.AmbientLight( 0xffffff, 3.0 ) );	
     // gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
 
     var spotLight = new THREE.SpotLight( 0xffffff );
@@ -1277,7 +1279,7 @@ function initThreeScene()
 
     gThreeScene.add(gCamera);
 
-    gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
+    gCameraControl = new OrbitControls(gCamera, gRenderer.domElement);
     gCameraControl.zoomSpeed = 2.0;
     gCameraControl.panSpeed = 0.4;
     gCameraControl.target = new THREE.Vector3(0.0, 140, 0.0);
@@ -1293,6 +1295,21 @@ function initThreeScene()
     // Visual arrow to represent gravity
     gravityArrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 0), 1, 0xff0000);
     gThreeScene.add(gravityArrow);
+}
+
+// ------------------------------------------------------------------
+// Function to list all objects within the scene
+function listSceneObjects() {
+    console.log("Scene Objects:");
+    gThreeScene.children.forEach((child, index) => {
+        console.log(`Object ${index + 1}:`, {
+            name: child.name || "Unnamed",
+            type: child.type,
+            position: child.position,
+            visible: child.visible,
+            source: child.userData.source || "Source info not available"
+        });
+    });
 }
 
 // ------- grabber -----------------------------------------------------------
@@ -1388,7 +1405,6 @@ function onPointer( evt )
     }
 }	
 
-
 // ------------------------------------------------------
 
 function onWindowResize() {
@@ -1416,10 +1432,6 @@ document.getElementById('checkboxEdges').addEventListener('click', function() {
     onShowEdges();
 });
 
-// document.getElementById('checkboxCollisions').addEventListener('click', function() {
-//     activateSelfCollisions = this.checked;
-// });
-
 document.getElementById("buttonRestart").addEventListener('click', function() {
     restart();
 })
@@ -1432,21 +1444,19 @@ document.getElementById("buttonExport").addEventListener('click', function() {
     exportCurrentMesh();
 })
 
-document.getElementById("bendingComplianceSlider").oninput = function() {
-    for (var i = 0; i < gPhysicsScene.objects.length; i++) 
-        gPhysicsScene.objects[i].bendingCompliance = this.value;
-}
-
 document.getElementById('checkboxGravity').addEventListener('change', function() {
     onGravityCheckboxChange()
 });
 
-document.getElementById('checkboxBoundingSphere').addEventListener('click', () => {
-    onShowBoundingSphere();
+document.getElementById('checkboxBoundingSpheres').addEventListener('change', function() {
+    toggleBoundingSpheresVisibility();
+});
+
+document.getElementById('checkboxShowCollisions').addEventListener('change', function() {
+    toggleCollisionVisualization()
 });
 
 // make browser to call us repeatedly -----------------------------------
-
 function update() {
     simulate();
     gRenderer.render(gThreeScene, gCamera);

@@ -28,13 +28,9 @@
     <input title='checkboxEdges' id="checkboxEdges" type="checkbox" value="1"> Hide Mesh&nbsp;&nbsp;
     <input title='checkboxGravity' id="checkboxGravity" type="checkbox" value="0"> Simulate Pulsatile Flow&nbsp;&nbsp;
     <input title='checkboxBoundingSpheres' id="checkboxBoundingSpheres" type="checkbox" value="1"> Hide Bounding Spheres&nbsp;&nbsp;
-    <input title='checkboxCollisions' id="checkboxShowCollisions" type="checkbox" value="0"> Show Collisions</p>
     <span id="numTris">0</span> tris&nbsp;&nbsp;
     <span id="numVerts">0</span> verts&nbsp;&nbsp;
     <span id="ms">0.000</span> ms per frame&nbsp;&nbsp;
-    Bending compliance:
-    <input title='Slider' type="range" min="0" max="1" value="0.05" step="0.05" id="bendingComplianceSlider" class="slider">
-    <span id="bendingCompliance">0</span>/1</p>
     <div id="container"></div>
     <script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
     <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
@@ -1279,7 +1275,7 @@ function initThreeScene()
 
     gThreeScene.add(gCamera);
 
-    gCameraControl = new OrbitControls(gCamera, gRenderer.domElement);
+    gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
     gCameraControl.zoomSpeed = 2.0;
     gCameraControl.panSpeed = 0.4;
     gCameraControl.target = new THREE.Vector3(0.0, 140, 0.0);

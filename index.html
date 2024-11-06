@@ -36,7 +36,10 @@
     <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
     </script>
     <script>        
-    // ----- math on vector arrays -------------------------------------------------------------
+    import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+// ----- math on vector arrays -------------------------------------------------------------
 
 function vecSetZero(a,anr) {
     anr *= 3;
@@ -114,7 +117,8 @@ var gravityArrow;
 var time = 0; // Initialize time
 var useSinusoidalGravity = false;
 var gravityConstant = -9.81;
-var maxVelocity = 250.0;
+var maxVelocity = 170.0;
+var totalForceMagnitude = 0;
 
 // ------------------------------------------------------------------
 
@@ -344,6 +348,48 @@ function clampVelocity(vel, maxVel) {
 }
 
 // ------------------------------------------------------------------
+function computeVertexNormals(vertices, indices, center) {
+    const normals = new Float32Array(vertices.length);
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+    const cb = new THREE.Vector3(), ab = new THREE.Vector3();
+
+    for (let i = 0; i < indices.length; i += 3) {
+        const indexA = indices[i] * 3;
+        const indexB = indices[i + 1] * 3;
+        const indexC = indices[i + 2] * 3;
+
+        vA.fromArray(vertices, indexA);
+        vB.fromArray(vertices, indexB);
+        vC.fromArray(vertices, indexC);
+
+        cb.subVectors(vC, vB);
+        ab.subVectors(vA, vB);
+        cb.cross(ab).normalize();
+
+        normals[indexA] += cb.x; normals[indexA + 1] += cb.y; normals[indexA + 2] += cb.z;
+        normals[indexB] += cb.x; normals[indexB + 1] += cb.y; normals[indexB + 2] += cb.z;
+        normals[indexC] += cb.x; normals[indexC + 1] += cb.y; normals[indexC + 2] += cb.z;
+    }
+
+    for (let i = 0; i < normals.length; i += 3) {
+        const normal = new THREE.Vector3(normals[i], normals[i + 1], normals[i + 2]).normalize();
+        
+        // Check if the normal points outward; if so, reverse it
+        const vertexPos = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+        const toCenter = new THREE.Vector3().subVectors(center, vertexPos);
+        if (normal.dot(toCenter) < 0) {
+            normal.negate();  // Invert to ensure it points inward
+        }
+
+        normals[i] = normal.x;
+        normals[i + 1] = normal.y;
+        normals[i + 2] = normal.z;
+    }
+
+    return normals;
+}
+
+// ------------------------------------------------------------------
 // Hash class
 class Hash {
     constructor(spacing, maxNumObjects){
@@ -479,6 +525,9 @@ class Cloth {
         this.vel = new Float32Array(3 * this.numParticles);
         this.invMass = new Float32Array(this.numParticles);
 
+        const center = new THREE.Vector3(0, 600, 0); // center point towards which closing force pulls
+        this.normals = computeVertexNormals(mesh.vertices, mesh.faceTriIds, center);
+
         var neighbors = findTriNeighbors(mesh.faceTriIds);
         var numTris = mesh.faceTriIds.length / 3;
         var edgeIds = [];
@@ -521,6 +570,8 @@ class Cloth {
         this.stretchingCompliance = 0.0;		
         this.bendingCompliance = bendingCompliance;
 
+        this.bloodFlowForceMagnitude = 9 * 10e0;  // Adjust this magnitude as needed
+
         this.temp = new Float32Array(4 * 3);
         this.grads = new Float32Array(4 * 3);
     
@@ -531,7 +582,7 @@ class Cloth {
         this.initClothPhysics(mesh.faceTriIds);
 
         // Bounding spheres radius (same as self-collision distance)
-        this.boundingSphereRadius = this.selfCollideDist * 1.5;
+        this.boundingSphereRadius = this.selfCollideDist * 2.5;
 
         // Create visualization for bounding spheres
         this.boundingSpheres = [];  // Array to store bounding spheres
@@ -616,7 +667,7 @@ class Cloth {
         var geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
         geometry.setIndex(edgeIds);
-        var lineMaterial = new THREE.LineBasicMaterial({color: 0x4C3B4D, linewidth: 100.0});
+        var lineMaterial = new THREE.LineBasicMaterial({color: 0x000000, linewidth: 20});
         // var lineMaterial = new THREE.MeshPhongMaterial({color: 0xff0000, side: THREE.DoubleSide});
         this.edgeMesh = new THREE.LineSegments(geometry, lineMaterial);
         this.edgeMesh.visible = true;
@@ -629,6 +680,7 @@ class Cloth {
         var visMaterial = new THREE.MeshPhongMaterial({ color: 0x4C3B4D, side: THREE.FrontSide });
         this.triMesh = new THREE.Mesh(geometry, visMaterial);
         this.triMesh.castShadow = true;
+        this.triMesh.receiveShadow = true;
         this.triMesh.userData = this; // for raycasting
         this.triMesh.layers.enable(1);
         scene.add(this.triMesh);
@@ -636,6 +688,8 @@ class Cloth {
         var backMaterial = new THREE.MeshPhongMaterial({color: 0x6A706E, side: THREE.BackSide});
         this.backMesh = new THREE.Mesh(geometry, backMaterial);
         this.backMesh.userData = this;	// for raycasting
+        this.backMesh.castShadow = true;
+        this.backMesh.receiveShadow = true;
         this.backMesh.layers.enable(1);
         scene.add(this.backMesh);
         geometry.computeVertexNormals();
@@ -841,17 +895,30 @@ class Cloth {
 
     preSolve(dt, gravity)
     {
+        const flowMagnitude = this.bloodFlowForceMagnitude;
+
         for (var i = 0; i < this.numParticles; i++) {
-            if (this.invMass[i] == 0.0)
-                continue;
-            vecAdd(this.vel,i, gravity,0, dt);            
-            vecCopy(this.prevPos,i, this.pos,i);
-            vecAdd(this.pos,i, this.vel,i, dt);
-            var y = this.pos[3 * i + 1];
-            if (y < 0.0) {
-                vecCopy(this.pos,i, this.prevPos,i);
-                this.pos[3 * i + 1] = 0.0;
-            }
+            if (this.invMass[i] == 0.0) continue;
+    
+            // Apply gravity
+            vecAdd(this.vel, i, gravity, 0, dt);
+    
+            // Use inward-pointing normal for blood flow force
+            const normal = new THREE.Vector3(
+                this.normals[i * 3],
+                this.normals[i * 3 + 1],
+                this.normals[i * 3 + 2]
+            );
+    
+            // Scale normal and apply force
+            normal.multiplyScalar(flowMagnitude * dt);
+            this.vel[i * 3] += normal.x;
+            this.vel[i * 3 + 1] += normal.y;
+            this.vel[i * 3 + 2] += normal.z;
+    
+            // Update position
+            vecCopy(this.prevPos, i, this.pos, i);
+            vecAdd(this.pos, i, this.vel, i, dt);
         }
     }
 
@@ -1152,15 +1219,25 @@ function simulate() {
     // Determine the gravity magnitude based on the checkboxGravity state
     var gravityMagnitude;
     if (useSinusoidalGravity) {
-        var amplitude = 60;   // Amplitude of the sinusoidal function
-        var frequency = 1;   // Frequency 
-        gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) + 0.5 * amplitude;
+        var amplitude = 100;   // Amplitude of the sinusoidal function
+        var frequency = 5;   // Frequency 
+        gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) - 0.65 * amplitude;
     } else {
         gravityMagnitude = gravityConstant; // Constant gravity
     }
 
     // Update gravity vector in the scene
     gPhysicsScene.gravity = [0.0, gravityMagnitude, 0.0];
+
+    // Initialize total force magnitude
+    let totalForceMagnitude = 0;
+
+    // Calculate combined force for each object
+    for (let i = 0; i < gPhysicsScene.objects.length; i++) {
+        const cloth = gPhysicsScene.objects[i];
+        const bloodFlowForce = Math.abs(cloth.bloodFlowForceMagnitude);
+        totalForceMagnitude += bloodFlowForce + gravityMagnitude;
+    }
 
     // Update visual arrow representing gravity direction
     gravityArrow.setDirection(new THREE.Vector3(0, Math.sign(gravityMagnitude), 0));
@@ -1189,6 +1266,7 @@ function simulate() {
     if (timeFrames > 10) {
         timeSum /= timeFrames;
         document.getElementById("ms").innerHTML = timeSum.toFixed(3);
+        document.getElementById("force").innerHTML = totalForceMagnitude.toFixed(0); // Display total force
         timeFrames = 0;
         timeSum = 0;
     }
@@ -1201,13 +1279,13 @@ function initThreeScene()
     
     // Lights
     
-    gThreeScene.add( new THREE.AmbientLight( 0xffffff, 3.0 ) );	
+    gThreeScene.add( new THREE.AmbientLight( 0xffffff, 2.0 ) );	
     // gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
 
     var spotLight = new THREE.SpotLight( 0xffffff );
-    spotLight.angle = Math.PI / 5;
+    spotLight.angle = Math.PI / 2;
     spotLight.penumbra = 0.2;
-    spotLight.position.set( 2, 3, 3 );
+    spotLight.position.set( 50, 200, 150);
     spotLight.castShadow = true;
     spotLight.shadow.camera.near = 3;
     spotLight.shadow.camera.far = 10;
@@ -1216,7 +1294,7 @@ function initThreeScene()
     gThreeScene.add( spotLight );
 
     var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-    dirLight.position.set( 0, 3, 0 );
+    dirLight.position.set( 0, 150, 0 );
     dirLight.castShadow = true;
     dirLight.shadow.camera.near = 1;
     dirLight.shadow.camera.far = 10;
@@ -1402,7 +1480,6 @@ function onPointer( evt )
 }	
 
 // ------------------------------------------------------
-
 function onWindowResize() {
 
     gCamera.aspect = window.innerWidth / window.innerHeight;
@@ -1446,6 +1523,10 @@ document.getElementById('checkboxGravity').addEventListener('change', function()
 
 document.getElementById('checkboxBoundingSpheres').addEventListener('change', function() {
     toggleBoundingSpheresVisibility();
+});
+
+document.getElementById('checkboxShowCollisions').addEventListener('change', function() {
+    toggleCollisionVisualization()
 });
 
 // make browser to call us repeatedly -----------------------------------
@@ -25192,6 +25273,7 @@ initThreeScene();
 onWindowResize();
 initPhysics();
 update();
+
     </script>
     <br><br>		
 </body>

@@ -122,1414 +122,1426 @@
     // ------------------------------------------------------------------
     
     var gPhysicsScene = 
-    {
-        gravity : [0.0, gravityConstant, 0.0],
-        dt : 1.0 / 25.0,
-        numSubsteps : 20,
-        paused: true,
-        showEdges: false,
-        objects: [],				
-    };
-    
-    // ------------------------------------------------------------------
-    function onShowEdges() 
-    {
-        gPhysicsScene.showEdges = !gPhysicsScene.showEdges;
-        for (var i = 0; i < gPhysicsScene.objects.length; i++) {
-            gPhysicsScene.objects[i].edgeMesh.visible = gPhysicsScene.showEdges;
+{
+    gravity : [0.0, gravityConstant, 0.0],
+    dt : 1.0 / 20.0,
+    numSubsteps : 20,
+    paused: true,
+    showEdges: false,
+    objects: [],				
+};
+
+// ------------------------------------------------------------------
+function onShowEdges() 
+{
+    gPhysicsScene.showEdges = !gPhysicsScene.showEdges;
+    for (var i = 0; i < gPhysicsScene.objects.length; i++) {
+        gPhysicsScene.objects[i].edgeMesh.visible = gPhysicsScene.showEdges;
+    }
+}	
+
+// ------------------------------------------------------------------
+// Function to handle checkbox change
+function onGravityCheckboxChange() {
+    useSinusoidalGravity = document.getElementById('checkboxGravity').checked;
+}
+
+// ------------------------------------------------------------------
+// Function to handle Collision checkbox change
+function toggleCollisionVisualization() {
+    Cloth.showCollisions = !Cloth.showCollisions;
+}
+
+// ------------------------------------------------------------------
+// function to handle bounding sphere visibility checkbox change
+function toggleBoundingSpheresVisibility() {
+    const showBoundingSpheres = document.getElementById('checkboxBoundingSpheres').checked;
+    for (let i = 0; i < gPhysicsScene.objects.length; i++) {
+        const object = gPhysicsScene.objects[i];
+        if (object.boundingSpheres) {
+            for (let j = 0; j < object.boundingSpheres.length; j++) {
+                object.boundingSpheres[j].visible = !showBoundingSpheres;
+            }
         }
-    }	
-    
-    // ------------------------------------------------------------------
-    // Function to handle checkbox change
-    function onGravityCheckboxChange() {
-        useSinusoidalGravity = document.getElementById('checkboxGravity').checked;
     }
-    
-    // ------------------------------------------------------------------
-    // Function to handle Collision checkbox change
-    function toggleCollisionVisualization() {
-        Cloth.showCollisions = !Cloth.showCollisions;
+}
+
+// ------------------------------------------------------------------
+function findTriNeighbors(triIds) 
+{
+    // create common edges
+
+    var edges = [];
+    var numTris = triIds.length / 3;
+
+    for (var i = 0; i < numTris; i++) {
+        for (var j = 0; j < 3; j++) {
+            var id0 = triIds[3 * i + j];
+            var id1 = triIds[3 * i + (j + 1) % 3];
+            edges.push({
+                id0 : Math.min(id0, id1), 
+                id1 : Math.max(id0, id1), 
+                edgeNr : 3 * i + j
+            });
+        }
     }
+
+    // sort so common edges are next to each other
+
+    edges.sort((a, b) => ((a.id0 < b.id0) || (a.id0 == b.id0 && a.id1 < b.id1)) ? -1 : 1);
+
+    // find matching edges
+
+    var neighbors = new Float32Array(3 * numTris);
+    neighbors.fill(-1);		// open edge
+
+    var nr = 0;
+    while (nr < edges.length) {
+        var e0 = edges[nr];
+        nr++;
+        if (nr < edges.length) {
+            var e1 = edges[nr];
+            if (e0.id0 == e1.id0 && e0.id1 == e1.id1) {
+                neighbors[e0.edgeNr] = e1.edgeNr;
+                neighbors[e1.edgeNr] = e0.edgeNr;
+            }
+            nr++;
+        }
+    }
+
+    return neighbors;
+}
+
+// ------------------------------------------------------------------
+function exportToSTL(geometry) {
+    let stl = '';
+    stl += 'solid exported\n';
+
+    const positions = geometry.attributes.position.array;
+    const indices = geometry.index.array;
+
+    for (let i = 0; i < indices.length; i += 3) {
+        const indexA = indices[i];
+        const indexB = indices[i + 1];
+        const indexC = indices[i + 2];
+
+        const vertexA = new THREE.Vector3(
+            positions[3 * indexA],
+            positions[3 * indexA + 1],
+            positions[3 * indexA + 2]
+        );
+        const vertexB = new THREE.Vector3(
+            positions[3 * indexB],
+            positions[3 * indexB + 1],
+            positions[3 * indexB + 2]
+        );
+        const vertexC = new THREE.Vector3(
+            positions[3 * indexC],
+            positions[3 * indexC + 1],
+            positions[3 * indexC + 2]
+        );
+
+        // Calculate the normal vector for the face
+        const normal = new THREE.Vector3();
+        normal.crossVectors(
+            new THREE.Vector3().subVectors(vertexB, vertexA),
+            new THREE.Vector3().subVectors(vertexC, vertexA)
+        ).normalize();
+
+        stl += 'facet normal ' + normal.x + ' ' + normal.y + ' ' + normal.z + '\n';
+        stl += 'outer loop\n';
+        stl += 'vertex ' + vertexA.x + ' ' + vertexA.y + ' ' + vertexA.z + '\n';
+        stl += 'vertex ' + vertexB.x + ' ' + vertexB.y + ' ' + vertexB.z + '\n';
+        stl += 'vertex ' + vertexC.x + ' ' + vertexC.y + ' ' + vertexC.z + '\n';
+        stl += 'endloop\n';
+        stl += 'endfacet\n';
+    }
+
+    stl += 'endsolid exported\n';
+    return stl;
+}
+
+// ------------------------------------------------------------------
+function saveSTLFile(stlString, filename = 'currentMesh.stl') {
+    // Create a Blob from the STL string
+    const blob = new Blob([stlString], { type: 'text/plain' });
     
-    // ------------------------------------------------------------------
-    // function to handle bounding sphere visibility checkbox change
-    function toggleBoundingSpheresVisibility() {
-        const showBoundingSpheres = document.getElementById('checkboxBoundingSpheres').checked;
-        for (let i = 0; i < gPhysicsScene.objects.length; i++) {
-            const object = gPhysicsScene.objects[i];
-            if (object.boundingSpheres) {
-                for (let j = 0; j < object.boundingSpheres.length; j++) {
-                    object.boundingSpheres[j].visible = !showBoundingSpheres;
+    // Create a download link
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;  // Use the fixed filename provided
+    
+    // Trigger the download
+    link.click();
+    
+    // Clean up the URL object
+    URL.revokeObjectURL(link.href);
+}
+
+// ------------------------------------------------------------------
+function exportCurrentMesh() {
+    if (gPhysicsScene.paused) {
+        let combinedSTL = '';
+        if (gPhysicsScene.objects.length > 0) {
+            // Assuming the first object in gPhysicsScene.objects is the cloth
+            let cloth = gPhysicsScene.objects[0];
+            let geometry = cloth.triMesh.geometry; // Access the geometry from the triMesh
+
+            if (geometry) {
+                combinedSTL += exportToSTL(geometry);
+            }
+        }
+
+        saveSTLFile(combinedSTL, 'currentMesh.stl');
+    } else {
+        console.log("Please pause the simulation before exporting.");
+    }
+}
+
+// ------------------------------------------------------------------
+// Calculate Minimum Edge Length
+function calculateSelfCollideDist(mesh) {
+    const positions = mesh.vertices;
+    const indices = mesh.faceTriIds;
+    let minEdgeLength = Infinity;
+    let seenEdges = new Set();
+
+    for (let i = 0; i < indices.length; i += 3) {
+        for (let j = 0; j < 3; j++) {
+            const indexA = indices[i + j];
+            const indexB = indices[i + (j + 1) % 3];
+
+            const edge = indexA < indexB ? `${indexA}-${indexB}` : `${indexB}-${indexA}`;
+            if (seenEdges.has(edge)) continue;
+            seenEdges.add(edge);
+
+            const dx = positions[3 * indexA] - positions[3 * indexB];
+            const dy = positions[3 * indexA + 1] - positions[3 * indexB + 1];
+            const dz = positions[3 * indexA + 2] - positions[3 * indexB + 2];
+
+            const edgeLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (edgeLength < minEdgeLength) {
+                minEdgeLength = edgeLength;
+            }
+        }
+    }
+
+    // Using the minimum edge length as self-collision distance
+    return minEdgeLength * 0.99; 
+}
+
+// ------------------------------------------------------------------
+function clampVelocity(vel, maxVel) {
+    for (let i = 0; i < vel.length; i += 3) {
+        let vx = vel[i];
+        let vy = vel[i + 1];
+        let vz = vel[i + 2];
+        let speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        if (speed > maxVel) {
+            let scaleFactor = maxVel / speed;
+            vel[i] *= scaleFactor;
+            vel[i + 1] *= scaleFactor;
+            vel[i + 2] *= scaleFactor;
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+function computeVertexNormals(vertices, indices, center) {
+    const normals = new Float32Array(vertices.length);
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+    const cb = new THREE.Vector3(), ab = new THREE.Vector3();
+
+    for (let i = 0; i < indices.length; i += 3) {
+        const indexA = indices[i] * 3;
+        const indexB = indices[i + 1] * 3;
+        const indexC = indices[i + 2] * 3;
+
+        vA.fromArray(vertices, indexA);
+        vB.fromArray(vertices, indexB);
+        vC.fromArray(vertices, indexC);
+
+        cb.subVectors(vC, vB);
+        ab.subVectors(vA, vB);
+        cb.cross(ab).normalize();
+
+        normals[indexA] += cb.x; normals[indexA + 1] += cb.y; normals[indexA + 2] += cb.z;
+        normals[indexB] += cb.x; normals[indexB + 1] += cb.y; normals[indexB + 2] += cb.z;
+        normals[indexC] += cb.x; normals[indexC + 1] += cb.y; normals[indexC + 2] += cb.z;
+    }
+
+    for (let i = 0; i < normals.length; i += 3) {
+        const normal = new THREE.Vector3(normals[i], normals[i + 1], normals[i + 2]).normalize();
+        
+        // Check if the normal points outward; if so, reverse it
+        const vertexPos = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+        const toCenter = new THREE.Vector3().subVectors(center, vertexPos);
+        if (normal.dot(toCenter) < 0) {
+            normal.negate();  // Invert to ensure it points inward
+        }
+
+        normals[i] = normal.x;
+        normals[i + 1] = normal.y;
+        normals[i + 2] = normal.z;
+    }
+
+    return normals;
+}
+
+// ------------------------------------------------------------------
+// Hash class
+class Hash {
+    constructor(spacing, maxNumObjects){
+        this.spacing = spacing;
+        this.tableSize = 5 * maxNumObjects;
+        this.cellStart = new Int32Array(this.tableSize + 1);
+        this.cellEntries = new Int32Array(maxNumObjects);
+        this.queryIds = new Int32Array(maxNumObjects);
+        this.querySize = 0;
+        this.maxNumObjects = maxNumObjects;
+        this.firstAdjId = new Int32Array(maxNumObjects + 1);
+        this.adjIds = new Int32Array(10 * maxNumObjects);
+    }
+
+    hashCoords(xi, yi, zi) {
+        var h = (xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481); // fantasy function
+        return Math.abs(h) % this.tableSize;
+    }
+
+    intCoord(coord) {
+        return Math.floor(coord / this.spacing);
+    }
+
+    hashPos(pos, nr) {
+        return this.hashCoords(
+            this.intCoord(pos[3 * nr]),
+            this.intCoord(pos[3 * nr + 1]),
+            this.intCoord(pos[3 * nr + 2])
+        );
+    }
+
+    create(pos) {
+        var numObjects = Math.min(pos.length / 3, this.cellEntries.length);
+
+        // Determine cell sizes
+        this.cellStart.fill(0);
+        this.cellEntries.fill(0);
+        for (var i = 0; i < numObjects; i++) {
+            var h = this.hashPos(pos, i);
+            this.cellStart[h]++;
+        }
+
+        // Determine cells starts
+        var start = 0;
+        for (var i = 0; i < this.tableSize; i++) {
+            var count = this.cellStart[i];
+            this.cellStart[i] = start;
+            start += count;
+        }
+        this.cellStart[this.tableSize] = start; // guard value
+
+        // Fill in objects ids
+        for (var i = 0; i < numObjects; i++) {
+            var h = this.hashPos(pos, i);
+            this.cellEntries[this.cellStart[h]++] = i;
+        }
+
+        // Correct last cell start values
+        for (var i = this.tableSize; i > 0; --i) {
+            this.cellStart[i] = this.cellStart[i - 1];
+        }
+        this.cellStart[0] = 0;
+    }
+
+    query(pos, nr, maxDist) {
+        var x0 = this.intCoord(pos[3 * nr] - maxDist);
+        var y0 = this.intCoord(pos[3 * nr + 1] - maxDist);
+        var z0 = this.intCoord(pos[3 * nr + 2] - maxDist);
+
+        var x1 = this.intCoord(pos[3 * nr] + maxDist);
+        var y1 = this.intCoord(pos[3 * nr + 1] + maxDist);
+        var z1 = this.intCoord(pos[3 * nr + 2] + maxDist);
+
+        this.querySize = 0;
+
+        for (var xi = x0; xi <= x1; xi++) {
+            for (var yi = y0; yi <= y1; yi++) {
+                for (var zi = z0; zi <= z1; zi++) {
+                    var h = this.hashCoords(xi, yi, zi);
+                    var start = this.cellStart[h];
+                    var end = this.cellStart[h + 1];
+
+                    for (var i = start; i < end; i++) {
+                        this.queryIds[this.querySize] = this.cellEntries[i];
+                        this.querySize++;
+                    }
                 }
             }
         }
     }
-    
-    // ------------------------------------------------------------------
-    function findTriNeighbors(triIds) 
+
+    queryAll(pos, maxDist) {
+
+        var num = 0;
+        var maxDist2 = maxDist * maxDist;
+
+        for (var i = 0; i < this.maxNumObjects; i++) {
+            var id0 = i;
+            this.firstAdjId[id0] = num;
+            this.query(pos, id0, maxDist);
+
+            for (var j = 0; j < this.querySize; j++) {
+                var id1 = this.queryIds[j];
+                if (id1 >= id0) continue;
+
+                var dist2 = vecDistSquared(pos, id0, pos, id1);
+                if (dist2 > maxDist2) continue;
+
+                if (num >= this.adjIds.length) {
+                    var newIds = new Int32Array(2 * num); // dynamic array
+                    newIds.set(this.adjIds);
+                    this.adjIds = newIds;
+                }
+                this.adjIds[num++] = id1;
+            }
+        }
+        this.firstAdjId[this.maxNumObjects] = num;
+    }
+}
+
+// ------------------------------------------------------------------
+class Cloth {
+    constructor(mesh, scene, fixedVertices, bendingCompliance = 0.05)
     {
-        // create common edges
-    
-        var edges = [];
-        var numTris = triIds.length / 3;
-    
+        // Calculate a reasonable self-collision distance based on the mesh
+        this.selfCollideDist = calculateSelfCollideDist(mesh); 
+
+        // particles
+        this.numParticles = mesh.vertices.length / 3;
+        this.pos = new Float32Array(mesh.vertices);
+        this.prevPos = new Float32Array(mesh.vertices);
+        this.restPos = new Float32Array(mesh.vertices);
+        this.vel = new Float32Array(3 * this.numParticles);
+        this.invMass = new Float32Array(this.numParticles);
+
+        const center = new THREE.Vector3(25, 400, 25); // center point towards which closing force pulls
+        this.normals = computeVertexNormals(mesh.vertices, mesh.faceTriIds, center);
+
+        var neighbors = findTriNeighbors(mesh.faceTriIds);
+        var numTris = mesh.faceTriIds.length / 3;
+        var edgeIds = [];
+        var triPairIds = [];
+
+        // Initialize the hash with appropriate spacing and particle count (Move this up)
+        this.hash = new Hash(10 * this.selfCollideDist, mesh.vertices.length / 3); 
+
         for (var i = 0; i < numTris; i++) {
             for (var j = 0; j < 3; j++) {
-                var id0 = triIds[3 * i + j];
-                var id1 = triIds[3 * i + (j + 1) % 3];
-                edges.push({
-                    id0 : Math.min(id0, id1), 
-                    id1 : Math.max(id0, id1), 
-                    edgeNr : 3 * i + j
+                var id0 = mesh.faceTriIds[3 * i + j];
+                var id1 = mesh.faceTriIds[3 * i + (j + 1) % 3];
+
+                // each edge only once
+                var n = neighbors[3 * i + j];
+                if (n < 0 || id0 < id1) {
+                    edgeIds.push(id0);
+                    edgeIds.push(id1);
+                }
+                // tri pair
+                if (n >= 0) {
+                    // opposite ids
+                    var ni = Math.floor(n / 3);
+                    var nj = n % 3;
+                    var id2 = mesh.faceTriIds[3 * i + (j + 2) % 3];
+                    var id3 = mesh.faceTriIds[3 * ni + (nj + 2) % 3];
+                    triPairIds.push(id0);
+                    triPairIds.push(id1);
+                    triPairIds.push(id2);
+                    triPairIds.push(id3);
+                }
+            }
+        }
+
+        this.stretchingIds = new Int32Array(edgeIds);
+        this.bendingIds = new Int32Array(triPairIds);
+        this.stretchingLengths = new Float32Array(this.stretchingIds.length / 2);
+        this.bendingLengths = new Float32Array(this.bendingIds.length / 4);
+
+        this.stretchingCompliance = 0.0;		
+        this.bendingCompliance = bendingCompliance;
+
+        this.bloodFlowForceMagnitude = 8 * 10e0;  // Adjust this magnitude as needed
+
+        this.temp = new Float32Array(4 * 3);
+        this.grads = new Float32Array(4 * 3);
+    
+        this.grabId = -1;
+        this.grabInvMass = 0.0;
+
+        this.fixedVertices = fixedVertices;
+        this.initClothPhysics(mesh.faceTriIds);
+
+        // Bounding spheres radius (same as self-collision distance)
+        this.boundingSphereRadius = this.selfCollideDist * 3,5;
+
+        // Create visualization for bounding spheres
+        this.boundingSpheres = [];  // Array to store bounding spheres
+        this.createBoundingSpheres(scene);  // Initialize bounding spheres
+
+        // Fixed points (anchors) for the papillary muscles
+        this.cordAnchors = [
+            new THREE.Vector3(10.0, 105.0, 3.476813162706094e-06),
+            new THREE.Vector3(9.807853698730469, 105.0, 1.9509083032608032),
+            new THREE.Vector3(5.555702209472656, 105.0, -8.314693450927734),
+            new THREE.Vector3(1.9509048461914062, 105.0, -9.807849884033203),
+            new THREE.Vector3(3.8268356323242188, 105.0, -9.238788604736328),
+            new THREE.Vector3(7.071067810058594, 105.0, -7.071064472198486),
+            new THREE.Vector3(8.314697265625, 105.0, -5.555698871612549),
+            new THREE.Vector3(9.238792419433594, 105.0, -3.8268320560455322),
+            new THREE.Vector3(9.807853698730469, 105.0, -1.9509013891220093),
+            new THREE.Vector3(9.238792419433594, 105.0, 3.8268392086029053),
+            new THREE.Vector3(0.0, 105.0, 9.999996185302734),
+            new THREE.Vector3(1.9509048461914062, 105.0, 9.807857513427734),
+            new THREE.Vector3(-3.8268356323242188, 105.0, 9.23879623413086),
+            new THREE.Vector3(-5.555702209472656, 105.0, 8.314693450927734),
+            new THREE.Vector3(3.8268356323242188, 105.0, 9.23879623413086),
+            new THREE.Vector3(-1.9509048461914062, 105.0, 9.807857513427734),
+            new THREE.Vector3(8.314697265625, 105.0, 5.555705547332764),
+            new THREE.Vector3(7.071067810058594, 105.0, 7.071071147918701),
+            new THREE.Vector3(5.555702209472656, 105.0, 8.314693450927734),
+            new THREE.Vector3(-5.7402496337890625, 105.0, 13.858196258544922),
+            new THREE.Vector3(-2.9263534545898438, 105.0, 14.711788177490234),
+            new THREE.Vector3(0.0, 105.0, 14.999996185302734),
+            new THREE.Vector3(2.9263534545898438, 105.0, 14.711788177490234),
+            new THREE.Vector3(8.33355712890625, 105.0, 12.472042083740234),
+            new THREE.Vector3(13.858192443847656, 105.0, 5.74025297164917),
+            new THREE.Vector3(15.0, 105.0, 3.476813162706094e-06),
+            new THREE.Vector3(12.4720458984375, 105.0, -8.333545684814453),
+            new THREE.Vector3(8.33355712890625, 105.0, -12.472042083740234),
+            new THREE.Vector3(2.9263534545898438, 105.0, -14.711772918701172),
+        ];
+        
+        this.meshPoints = [
+            new THREE.Vector3(18.43963623046875, 115.37950897216797, -2.5671119689941406),
+            new THREE.Vector3(18.849258422851562, 116.5769271850586, 3.1053736209869385),
+            new THREE.Vector3(13.893844604492188, 119.29920196533203, -21.529010772705078),
+            new THREE.Vector3(5.584556579589844, 120.93396759033203, -31.138385772705078),
+            new THREE.Vector3(9.759597778320312, 118.50547790527344, -26.610851287841797),
+            new THREE.Vector3(15.403411865234375, 119.59097290039062, -18.831226348876953),
+            new THREE.Vector3(16.972312927246094, 118.29377746582031, -13.385822296142578),
+            new THREE.Vector3(17.578887939453125, 116.10016632080078, -8.171955108642578),
+            new THREE.Vector3(17.968551635742188, 115.4803237915039, -5.410572052001953),
+            new THREE.Vector3(18.171737670898438, 117.6713638305664, 5.736919403076172),
+            new THREE.Vector3(-2.7476806640625, 127.55111694335938, 25.650890350341797),
+            new THREE.Vector3(1.924530029296875, 126.52765655517578, 22.822811126708984),
+            new THREE.Vector3(-10.666183471679688, 124.57829284667969, 26.132823944091797),
+            new THREE.Vector3(-15.733230590820312, 121.9059066772461, 24.206035614013672),
+            new THREE.Vector3(5.596824645996094, 124.80231475830078, 19.101726531982422),
+            new THREE.Vector3(-8.1502685546875, 126.08170318603516, 26.528087615966797),
+            new THREE.Vector3(14.784210205078125, 119.98833465576172, 9.793025970458984),
+            new THREE.Vector3(10.755401611328125, 122.07196044921875, 13.19851303100586),
+            new THREE.Vector3(7.240943908691406, 123.91021728515625, 17.081462860107422),
+            new THREE.Vector3(-11.151466369628906, 138.10520935058594, 24.20661735534668),
+            new THREE.Vector3(-5.943870544433594, 136.26954650878906, 25.32295036315918),
+            new THREE.Vector3(-0.46230316162109375, 135.47337341308594, 23.782773971557617),
+            new THREE.Vector3(4.46282958984375, 134.60675048828125, 20.484296798706055),
+            new THREE.Vector3(11.590568542480469, 126.74313354492188, 13.532483100891113),
+            new THREE.Vector3(16.50537109375, 123.81207275390625, 6.04020357131958),
+            new THREE.Vector3(18.92437744140625, 125.92546081542969, -5.66621732711792),
+            new THREE.Vector3(16.188858032226562, 126.06763458251953, -18.009464263916016),
+            new THREE.Vector3(11.750747680664062, 128.40870666503906, -28.048267364501953),
+            new THREE.Vector3(6.2244415283203125, 129.95921325683594, -34.354190826416016),
+        ];           
+
+        this.cordConstraints = []; // To be populated
+        this.cordRestLengths = []; // To store the resting lengths of the cords
+
+        // Automatically populate the cordConstraints array
+        this.populateCordConstraints();
+
+        // Add a group to hold chordae lines
+        this.cordLinesGroup = new THREE.Group();
+        scene.add(this.cordLinesGroup);  // Add the group to the scene
+
+        // visual edge mesh
+        var geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+        geometry.setIndex(edgeIds);
+        var lineMaterial = new THREE.LineBasicMaterial({color: 0x000000, linewidth: 20});
+        // var lineMaterial = new THREE.MeshPhongMaterial({color: 0xff0000, side: THREE.DoubleSide});
+        this.edgeMesh = new THREE.LineSegments(geometry, lineMaterial);
+        this.edgeMesh.visible = true;
+        scene.add(this.edgeMesh);
+
+        // visual tri mesh
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+        geometry.setIndex(mesh.faceTriIds);
+        var visMaterial = new THREE.MeshPhongMaterial({ color: 0x4C3B4D, side: THREE.FrontSide });
+        this.triMesh = new THREE.Mesh(geometry, visMaterial);
+        this.triMesh.castShadow = true;
+        this.triMesh.receiveShadow = true;
+        this.triMesh.userData = this; // for raycasting
+        this.triMesh.layers.enable(1);
+        scene.add(this.triMesh);
+        
+        var backMaterial = new THREE.MeshPhongMaterial({color: 0x6A706E, side: THREE.BackSide});
+        this.backMesh = new THREE.Mesh(geometry, backMaterial);
+        this.backMesh.userData = this;	// for raycasting
+        this.backMesh.castShadow = true;
+        this.backMesh.receiveShadow = true;
+        this.backMesh.layers.enable(1);
+        scene.add(this.backMesh);
+        geometry.computeVertexNormals();
+
+    
+        // Create a line for each cord
+        this.cordLines = [];
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+            const material = new THREE.LineBasicMaterial({ color: 0xff0000 });  // Red color for the cords
+            const line = new THREE.Line(geometry, material);
+            this.cordLinesGroup.add(line);  // Add the line to the group
+            this.cordLines.push(line);  // Store it for updating later
+        }
+        this.updateMeshes()
+    }
+
+    // Method to remove existing bounding spheres from the scene
+    removeBoundingSpheres(scene) {
+        while (this.boundingSpheres.length > 0) {
+            const sphere = this.boundingSpheres.pop(); // Remove from the array
+            scene.remove(sphere); // Also remove from the scene
+        }
+    }
+
+    // Method to create bounding sphere meshes for visualization
+    createBoundingSpheres(scene) {
+    // Remove any existing bounding spheres before creating new ones
+    this.removeBoundingSpheres(scene);
+
+    // Define the default material for bounding spheres
+    const sphereGeometry = new THREE.SphereGeometry(this.boundingSphereRadius, 6, 6);
+    const sphereMaterial = new THREE.MeshBasicMaterial({ wireframe: false });  // spheres
+
+    for (let i = 0; i < this.numParticles; i++) {
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone());  // Clone material for each sphere
+        const initialPosition = new THREE.Vector3(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+        sphere.position.copy(initialPosition);
+        scene.add(sphere);
+        this.boundingSpheres.push(sphere);  // Store reference to update later
+        }
+    }
+
+    updateBoundingSpheres() {
+        // Reset sphere colors before checking for collisions
+        const defaultColor = new THREE.Color(0x82968C);  // Default color
+        const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
+    
+        for (let i = 0; i < this.boundingSpheres.length; i++) {
+            const sphere = this.boundingSpheres[i];
+            sphere.position.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+    
+            // Reset to default color before collision detection
+            sphere.material.color = defaultColor.clone();
+        }
+    }
+
+    // Method to find the closest vertex for each cord mesh point
+    populateCordConstraints() {
+        const vertexCount = this.pos.length / 3; // Number of vertices in the mesh
+
+        for (let i = 0; i < this.meshPoints.length; i++) {
+            const meshPoint = this.meshPoints[i];
+            const fixedAnchor = this.cordAnchors[i];
+
+            let closestVertexIndex = -1;
+            let minDistance = Infinity;
+
+            // Iterate through all vertices to find the closest one to this mesh point
+            for (let j = 0; j < vertexCount; j++) {
+                const vertexPos = new THREE.Vector3(
+                    this.pos[j * 3],
+                    this.pos[j * 3 + 1],
+                    this.pos[j * 3 + 2]
+                );
+
+                const distance = vertexPos.distanceTo(meshPoint);
+
+                // Update closest vertex if this one is nearer
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestVertexIndex = j;
+                }
+            }
+
+            // After finding the closest vertex, add it to the constraints array
+            if (closestVertexIndex >= 0) {
+                // Calculate the initial/resting length
+                const initialDistance = fixedAnchor.distanceTo(meshPoint);
+                
+                // Store the constraint and its corresponding rest length
+                this.cordConstraints.push({
+                    clothVertexIndex: closestVertexIndex,
+                    anchor: fixedAnchor
                 });
+                
+                // Store the resting length for this cord
+                this.cordRestLengths.push(initialDistance);
             }
         }
-    
-        // sort so common edges are next to each other
-    
-        edges.sort((a, b) => ((a.id0 < b.id0) || (a.id0 == b.id0 && a.id1 < b.id1)) ? -1 : 1);
-    
-        // find matching edges
-    
-        var neighbors = new Float32Array(3 * numTris);
-        neighbors.fill(-1);		// open edge
-    
-        var nr = 0;
-        while (nr < edges.length) {
-            var e0 = edges[nr];
-            nr++;
-            if (nr < edges.length) {
-                var e1 = edges[nr];
-                if (e0.id0 == e1.id0 && e0.id1 == e1.id1) {
-                    neighbors[e0.edgeNr] = e1.edgeNr;
-                    neighbors[e1.edgeNr] = e0.edgeNr;
-                }
-                nr++;
-            }
-        }
-    
-        return neighbors;
     }
-    
-    // ------------------------------------------------------------------
-    function exportToSTL(geometry) {
-        let stl = '';
-        stl += 'solid exported\n';
-    
-        const positions = geometry.attributes.position.array;
-        const indices = geometry.index.array;
-    
-        for (let i = 0; i < indices.length; i += 3) {
-            const indexA = indices[i];
-            const indexB = indices[i + 1];
-            const indexC = indices[i + 2];
-    
-            const vertexA = new THREE.Vector3(
-                positions[3 * indexA],
-                positions[3 * indexA + 1],
-                positions[3 * indexA + 2]
-            );
-            const vertexB = new THREE.Vector3(
-                positions[3 * indexB],
-                positions[3 * indexB + 1],
-                positions[3 * indexB + 2]
-            );
-            const vertexC = new THREE.Vector3(
-                positions[3 * indexC],
-                positions[3 * indexC + 1],
-                positions[3 * indexC + 2]
-            );
-    
-            // Calculate the normal vector for the face
-            const normal = new THREE.Vector3();
-            normal.crossVectors(
-                new THREE.Vector3().subVectors(vertexB, vertexA),
-                new THREE.Vector3().subVectors(vertexC, vertexA)
-            ).normalize();
-    
-            stl += 'facet normal ' + normal.x + ' ' + normal.y + ' ' + normal.z + '\n';
-            stl += 'outer loop\n';
-            stl += 'vertex ' + vertexA.x + ' ' + vertexA.y + ' ' + vertexA.z + '\n';
-            stl += 'vertex ' + vertexB.x + ' ' + vertexB.y + ' ' + vertexB.z + '\n';
-            stl += 'vertex ' + vertexC.x + ' ' + vertexC.y + ' ' + vertexC.z + '\n';
-            stl += 'endloop\n';
-            stl += 'endfacet\n';
-        }
-    
-        stl += 'endsolid exported\n';
-        return stl;
-    }
-    
-    // ------------------------------------------------------------------
-    function saveSTLFile(stlString, filename = 'currentMesh.stl') {
-        // Create a Blob from the STL string
-        const blob = new Blob([stlString], { type: 'text/plain' });
-        
-        // Create a download link
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = filename;  // Use the fixed filename provided
-        
-        // Trigger the download
-        link.click();
-        
-        // Clean up the URL object
-        URL.revokeObjectURL(link.href);
-    }
-    
-    // ------------------------------------------------------------------
-    function exportCurrentMesh() {
-        if (gPhysicsScene.paused) {
-            let combinedSTL = '';
-            if (gPhysicsScene.objects.length > 0) {
-                // Assuming the first object in gPhysicsScene.objects is the cloth
-                let cloth = gPhysicsScene.objects[0];
-                let geometry = cloth.triMesh.geometry; // Access the geometry from the triMesh
-    
-                if (geometry) {
-                    combinedSTL += exportToSTL(geometry);
-                }
-            }
-    
-            saveSTLFile(combinedSTL, 'currentMesh.stl');
-        } else {
-            console.log("Please pause the simulation before exporting.");
-        }
-    }
-    
-    // ------------------------------------------------------------------
-    // Calculate Minimum Edge Length
-    function calculateSelfCollideDist(mesh) {
-        const positions = mesh.vertices;
-        const indices = mesh.faceTriIds;
-        let minEdgeLength = Infinity;
-        let seenEdges = new Set();
-    
-        for (let i = 0; i < indices.length; i += 3) {
-            for (let j = 0; j < 3; j++) {
-                const indexA = indices[i + j];
-                const indexB = indices[i + (j + 1) % 3];
-    
-                const edge = indexA < indexB ? `${indexA}-${indexB}` : `${indexB}-${indexA}`;
-                if (seenEdges.has(edge)) continue;
-                seenEdges.add(edge);
-    
-                const dx = positions[3 * indexA] - positions[3 * indexB];
-                const dy = positions[3 * indexA + 1] - positions[3 * indexB + 1];
-                const dz = positions[3 * indexA + 2] - positions[3 * indexB + 2];
-    
-                const edgeLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                if (edgeLength < minEdgeLength) {
-                    minEdgeLength = edgeLength;
-                }
-            }
-        }
-    
-        // Using the minimum edge length as self-collision distance
-        return minEdgeLength * 0.99; 
-    }
-    
-    // ------------------------------------------------------------------
-    function clampVelocity(vel, maxVel) {
-        for (let i = 0; i < vel.length; i += 3) {
-            let vx = vel[i];
-            let vy = vel[i + 1];
-            let vz = vel[i + 2];
-            let speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-            if (speed > maxVel) {
-                let scaleFactor = maxVel / speed;
-                vel[i] *= scaleFactor;
-                vel[i + 1] *= scaleFactor;
-                vel[i + 2] *= scaleFactor;
+
+    // Full mesh self-collision detection using bounding spheres
+    solveSelfCollisions() {
+        this.hash.create(this.pos);  // Update spatial hash table with new positions
+        const boundingSphereRadius2 = this.boundingSphereRadius * this.boundingSphereRadius;
+
+        const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
+
+        // Loop through all particles and resolve collisions with neighbors
+        for (let i = 0; i < this.numParticles; i++) {
+            if (this.invMass[i] === 0.0) continue; // Skip fixed vertices
+
+            // Query neighbors within the bounding sphere's radius using the spatial hash
+            this.hash.query(this.pos, i, 3 * this.boundingSphereRadius);
+
+            for (let j = 0; j < this.hash.querySize; j++) {
+                let otherId = this.hash.queryIds[j];
+                if (i >= otherId) continue; // Avoid double-counting collisions
+
+                // Compute distance between the two particles
+                const distSquared = vecDistSquared(this.pos, i, this.pos, otherId);
+                if (distSquared >= boundingSphereRadius2) continue;  // No collision
+
+                // Collision detected: Resolve overlap by applying position correction
+                const dist = Math.sqrt(distSquared);
+                const overlap = this.boundingSphereRadius - dist;
+                const invMassSum = this.invMass[i] + this.invMass[otherId];
+                
+                if (invMassSum === 0.0) continue;  // If both particles are fixed, skip
+                
+                // Calculate correction direction (normalized difference between positions)
+                vecSetDiff(this.grads, 0, this.pos, i, this.pos, otherId);
+                vecScale(this.grads, 0, overlap / dist);  // Scale by the overlap to resolve collision
+
+                // Apply position correction proportionally to the inverse masses
+                vecAdd(this.pos, i, this.grads, 0, this.invMass[i] / invMassSum);
+                vecAdd(this.pos, otherId, this.grads, 0, -this.invMass[otherId] / invMassSum);
+
+                // Collision detected: Set collision color
+                this.boundingSpheres[i].material.color = collisionColor.clone();
+                this.boundingSpheres[otherId].material.color = collisionColor.clone();
             }
         }
     }
     
-    // ------------------------------------------------------------------
-    function computeVertexNormals(vertices, indices, center) {
-        const normals = new Float32Array(vertices.length);
-        const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
-        const cb = new THREE.Vector3(), ab = new THREE.Vector3();
-    
-        for (let i = 0; i < indices.length; i += 3) {
-            const indexA = indices[i] * 3;
-            const indexB = indices[i + 1] * 3;
-            const indexC = indices[i + 2] * 3;
-    
-            vA.fromArray(vertices, indexA);
-            vB.fromArray(vertices, indexB);
-            vC.fromArray(vertices, indexC);
-    
-            cb.subVectors(vC, vB);
-            ab.subVectors(vA, vB);
-            cb.cross(ab).normalize();
-    
-            normals[indexA] += cb.x; normals[indexA + 1] += cb.y; normals[indexA + 2] += cb.z;
-            normals[indexB] += cb.x; normals[indexB + 1] += cb.y; normals[indexB + 2] += cb.z;
-            normals[indexC] += cb.x; normals[indexC + 1] += cb.y; normals[indexC + 2] += cb.z;
+    initClothPhysics(triIds) 
+    {
+        this.invMass.fill(0.0);
+
+        var numTris = triIds.length / 3;
+        var e0 = [0.0, 0.0, 0.0];
+        var e1 = [0.0, 0.0, 0.0];
+        var c = [0.0, 0.0, 0.0];
+        var massScale = 10.0; // Adjust this value to make particles heavier or lighter
+
+        for (var i = 0; i < numTris; i++) {
+            var id0 = triIds[3 * i];
+            var id1 = triIds[3 * i + 1];
+            var id2 = triIds[3 * i + 2];
+            vecSetDiff(e0,0, this.pos,id1, this.pos,id0);
+            vecSetDiff(e1,0, this.pos,id2, this.pos,id0);
+            vecSetCross(c,0, e0,0, e1,0);
+            var A = 0.5 * Math.sqrt(vecLengthSquared(c,0));
+            var pInvMass = A > 0.0 ? 1.0 / A / 3.0 : 0.0;
+            var pInvMass = A > 0.0 ? massScale / A / 3.0 : 0.0; // Apply massScale here
+            this.invMass[id0] += pInvMass;
+            this.invMass[id1] += pInvMass;
+            this.invMass[id2] += pInvMass;
         }
-    
-        for (let i = 0; i < normals.length; i += 3) {
-            const normal = new THREE.Vector3(normals[i], normals[i + 1], normals[i + 2]).normalize();
+
+        for (var i = 0; i < this.stretchingLengths.length; i++) {
+            var id0 = this.stretchingIds[2 * i];
+            var id1 = this.stretchingIds[2 * i + 1];
+            this.stretchingLengths[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
+        }
+
+        for (var i = 0; i < this.bendingLengths.length; i++) {
+            var id0 = this.bendingIds[4 * i + 2];
+            var id1 = this.bendingIds[4 * i + 3];
+            this.bendingLengths[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
+        }
+
+        // Fix vertices based on input coordinates using tolerance
+        const tol = 0.3;
+
+        for (var i = 0; i < this.numParticles; i++) {
+            var x = this.pos[3 * i];
+            var y = this.pos[3 * i + 1];
+            var z = this.pos[3 * i + 2];
             
-            // Check if the normal points outward; if so, reverse it
-            const vertexPos = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]);
-            const toCenter = new THREE.Vector3().subVectors(center, vertexPos);
-            if (normal.dot(toCenter) < 0) {
-                normal.negate();  // Invert to ensure it points inward
-            }
-    
-            normals[i] = normal.x;
-            normals[i + 1] = normal.y;
-            normals[i + 2] = normal.z;
-        }
-    
-        return normals;
-    }
-    
-    // ------------------------------------------------------------------
-    // Hash class
-    class Hash {
-        constructor(spacing, maxNumObjects){
-            this.spacing = spacing;
-            this.tableSize = 5 * maxNumObjects;
-            this.cellStart = new Int32Array(this.tableSize + 1);
-            this.cellEntries = new Int32Array(maxNumObjects);
-            this.queryIds = new Int32Array(maxNumObjects);
-            this.querySize = 0;
-            this.maxNumObjects = maxNumObjects;
-            this.firstAdjId = new Int32Array(maxNumObjects + 1);
-            this.adjIds = new Int32Array(10 * maxNumObjects);
-        }
-    
-        hashCoords(xi, yi, zi) {
-            var h = (xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481); // fantasy function
-            return Math.abs(h) % this.tableSize;
-        }
-    
-        intCoord(coord) {
-            return Math.floor(coord / this.spacing);
-        }
-    
-        hashPos(pos, nr) {
-            return this.hashCoords(
-                this.intCoord(pos[3 * nr]),
-                this.intCoord(pos[3 * nr + 1]),
-                this.intCoord(pos[3 * nr + 2])
-            );
-        }
-    
-        create(pos) {
-            var numObjects = Math.min(pos.length / 3, this.cellEntries.length);
-    
-            // Determine cell sizes
-            this.cellStart.fill(0);
-            this.cellEntries.fill(0);
-            for (var i = 0; i < numObjects; i++) {
-                var h = this.hashPos(pos, i);
-                this.cellStart[h]++;
-            }
-    
-            // Determine cells starts
-            var start = 0;
-            for (var i = 0; i < this.tableSize; i++) {
-                var count = this.cellStart[i];
-                this.cellStart[i] = start;
-                start += count;
-            }
-            this.cellStart[this.tableSize] = start; // guard value
-    
-            // Fill in objects ids
-            for (var i = 0; i < numObjects; i++) {
-                var h = this.hashPos(pos, i);
-                this.cellEntries[this.cellStart[h]++] = i;
-            }
-    
-            // Correct last cell start values
-            for (var i = this.tableSize; i > 0; --i) {
-                this.cellStart[i] = this.cellStart[i - 1];
-            }
-            this.cellStart[0] = 0;
-        }
-    
-        query(pos, nr, maxDist) {
-            var x0 = this.intCoord(pos[3 * nr] - maxDist);
-            var y0 = this.intCoord(pos[3 * nr + 1] - maxDist);
-            var z0 = this.intCoord(pos[3 * nr + 2] - maxDist);
-    
-            var x1 = this.intCoord(pos[3 * nr] + maxDist);
-            var y1 = this.intCoord(pos[3 * nr + 1] + maxDist);
-            var z1 = this.intCoord(pos[3 * nr + 2] + maxDist);
-    
-            this.querySize = 0;
-    
-            for (var xi = x0; xi <= x1; xi++) {
-                for (var yi = y0; yi <= y1; yi++) {
-                    for (var zi = z0; zi <= z1; zi++) {
-                        var h = this.hashCoords(xi, yi, zi);
-                        var start = this.cellStart[h];
-                        var end = this.cellStart[h + 1];
-    
-                        for (var i = start; i < end; i++) {
-                            this.queryIds[this.querySize] = this.cellEntries[i];
-                            this.querySize++;
-                        }
-                    }
+            for (var j = 0; j < this.fixedVertices.length; j++) {
+                var fixedVertex = this.fixedVertices[j];
+                if (Math.abs(x - fixedVertex[0]) < tol &&
+                    Math.abs(y - fixedVertex[1]) < tol &&
+                    Math.abs(z - fixedVertex[2]) < tol) {
+                    this.invMass[i] = 0.0;
+                    break;
                 }
             }
         }
-    
-        queryAll(pos, maxDist) {
-    
-            var num = 0;
-            var maxDist2 = maxDist * maxDist;
-    
-            for (var i = 0; i < this.maxNumObjects; i++) {
-                var id0 = i;
-                this.firstAdjId[id0] = num;
-                this.query(pos, id0, maxDist);
-    
-                for (var j = 0; j < this.querySize; j++) {
-                    var id1 = this.queryIds[j];
-                    if (id1 >= id0) continue;
-    
-                    var dist2 = vecDistSquared(pos, id0, pos, id1);
-                    if (dist2 > maxDist2) continue;
-    
-                    if (num >= this.adjIds.length) {
-                        var newIds = new Int32Array(2 * num); // dynamic array
-                        newIds.set(this.adjIds);
-                        this.adjIds = newIds;
-                    }
-                    this.adjIds[num++] = id1;
-                }
-            }
-            this.firstAdjId[this.maxNumObjects] = num;
-        }
-    }
-    
-    // ------------------------------------------------------------------
-    class Cloth {
-        constructor(mesh, scene, fixedVertices, bendingCompliance = 0.05)
-        {
-            // Calculate a reasonable self-collision distance based on the mesh
-            this.selfCollideDist = calculateSelfCollideDist(mesh); 
-    
-            // particles
-            this.numParticles = mesh.vertices.length / 3;
-            this.pos = new Float32Array(mesh.vertices);
-            this.prevPos = new Float32Array(mesh.vertices);
-            this.restPos = new Float32Array(mesh.vertices);
-            this.vel = new Float32Array(3 * this.numParticles);
-            this.invMass = new Float32Array(this.numParticles);
-    
-            const center = new THREE.Vector3(0, 600, 0); // center point towards which closing force pulls
-            this.normals = computeVertexNormals(mesh.vertices, mesh.faceTriIds, center);
-    
-            var neighbors = findTriNeighbors(mesh.faceTriIds);
-            var numTris = mesh.faceTriIds.length / 3;
-            var edgeIds = [];
-            var triPairIds = [];
-    
-            // Initialize the hash with appropriate spacing and particle count (Move this up)
-            this.hash = new Hash(10 * this.selfCollideDist, mesh.vertices.length / 3); 
-    
-            for (var i = 0; i < numTris; i++) {
-                for (var j = 0; j < 3; j++) {
-                    var id0 = mesh.faceTriIds[3 * i + j];
-                    var id1 = mesh.faceTriIds[3 * i + (j + 1) % 3];
-    
-                    // each edge only once
-                    var n = neighbors[3 * i + j];
-                    if (n < 0 || id0 < id1) {
-                        edgeIds.push(id0);
-                        edgeIds.push(id1);
-                    }
-                    // tri pair
-                    if (n >= 0) {
-                        // opposite ids
-                        var ni = Math.floor(n / 3);
-                        var nj = n % 3;
-                        var id2 = mesh.faceTriIds[3 * i + (j + 2) % 3];
-                        var id3 = mesh.faceTriIds[3 * ni + (nj + 2) % 3];
-                        triPairIds.push(id0);
-                        triPairIds.push(id1);
-                        triPairIds.push(id2);
-                        triPairIds.push(id3);
-                    }
-                }
-            }
-    
-            this.stretchingIds = new Int32Array(edgeIds);
-            this.bendingIds = new Int32Array(triPairIds);
-            this.stretchingLengths = new Float32Array(this.stretchingIds.length / 2);
-            this.bendingLengths = new Float32Array(this.bendingIds.length / 4);
-    
-            this.stretchingCompliance = 0.0;		
-            this.bendingCompliance = bendingCompliance;
-    
-            this.bloodFlowForceMagnitude = 9 * 10e0;  // Adjust this magnitude as needed
-    
-            this.temp = new Float32Array(4 * 3);
-            this.grads = new Float32Array(4 * 3);
+    }   
+
+    preSolve(dt, gravity) {
+        const bloodDensity = 1.06;  // g/cm³
+        const valveArea = 40 * 40;  // Approximate mitral valve area
+        const pulseFrequency = 6;  // Frequency for heart rate
+        const maxPressureAmplitude = 1;  // Maximum pressure amplitude, adjustable for realism
         
-            this.grabId = -1;
-            this.grabInvMass = 0.0;
-    
-            this.fixedVertices = fixedVertices;
-            this.initClothPhysics(mesh.faceTriIds);
-    
-            // Bounding spheres radius (same as self-collision distance)
-            this.boundingSphereRadius = this.selfCollideDist * 2.5;
-    
-            // Create visualization for bounding spheres
-            this.boundingSpheres = [];  // Array to store bounding spheres
-            this.createBoundingSpheres(scene);  // Initialize bounding spheres
-    
-            // Fixed points (anchors) for the papillary muscles
-            this.cordAnchors = [
-                new THREE.Vector3(10.0, 105.0, 3.476813162706094e-06),
-                new THREE.Vector3(9.807853698730469, 105.0, 1.9509083032608032),
-                new THREE.Vector3(5.555702209472656, 105.0, -8.314693450927734),
-                new THREE.Vector3(1.9509048461914062, 105.0, -9.807849884033203),
-                new THREE.Vector3(3.8268356323242188, 105.0, -9.238788604736328),
-                new THREE.Vector3(7.071067810058594, 105.0, -7.071064472198486),
-                new THREE.Vector3(8.314697265625, 105.0, -5.555698871612549),
-                new THREE.Vector3(9.238792419433594, 105.0, -3.8268320560455322),
-                new THREE.Vector3(9.807853698730469, 105.0, -1.9509013891220093),
-                new THREE.Vector3(9.238792419433594, 105.0, 3.8268392086029053),
-                new THREE.Vector3(0.0, 105.0, 9.999996185302734),
-                new THREE.Vector3(1.9509048461914062, 105.0, 9.807857513427734),
-                new THREE.Vector3(-3.8268356323242188, 105.0, 9.23879623413086),
-                new THREE.Vector3(-5.555702209472656, 105.0, 8.314693450927734),
-                new THREE.Vector3(3.8268356323242188, 105.0, 9.23879623413086),
-                new THREE.Vector3(-1.9509048461914062, 105.0, 9.807857513427734),
-                new THREE.Vector3(8.314697265625, 105.0, 5.555705547332764),
-                new THREE.Vector3(7.071067810058594, 105.0, 7.071071147918701),
-                new THREE.Vector3(5.555702209472656, 105.0, 8.314693450927734),
-                new THREE.Vector3(-5.7402496337890625, 105.0, 13.858196258544922),
-                new THREE.Vector3(-2.9263534545898438, 105.0, 14.711788177490234),
-                new THREE.Vector3(0.0, 105.0, 14.999996185302734),
-                new THREE.Vector3(2.9263534545898438, 105.0, 14.711788177490234),
-                new THREE.Vector3(8.33355712890625, 105.0, 12.472042083740234),
-                new THREE.Vector3(13.858192443847656, 105.0, 5.74025297164917),
-                new THREE.Vector3(15.0, 105.0, 3.476813162706094e-06),
-                new THREE.Vector3(12.4720458984375, 105.0, -8.333545684814453),
-                new THREE.Vector3(8.33355712890625, 105.0, -12.472042083740234),
-                new THREE.Vector3(2.9263534545898438, 105.0, -14.711772918701172),
-            ];
-            
-            this.meshPoints = [
-                new THREE.Vector3(18.43963623046875, 115.37950897216797, -2.5671119689941406),
-                new THREE.Vector3(18.849258422851562, 116.5769271850586, 3.1053736209869385),
-                new THREE.Vector3(13.893844604492188, 119.29920196533203, -21.529010772705078),
-                new THREE.Vector3(5.584556579589844, 120.93396759033203, -31.138385772705078),
-                new THREE.Vector3(9.759597778320312, 118.50547790527344, -26.610851287841797),
-                new THREE.Vector3(15.403411865234375, 119.59097290039062, -18.831226348876953),
-                new THREE.Vector3(16.972312927246094, 118.29377746582031, -13.385822296142578),
-                new THREE.Vector3(17.578887939453125, 116.10016632080078, -8.171955108642578),
-                new THREE.Vector3(17.968551635742188, 115.4803237915039, -5.410572052001953),
-                new THREE.Vector3(18.171737670898438, 117.6713638305664, 5.736919403076172),
-                new THREE.Vector3(-2.7476806640625, 127.55111694335938, 25.650890350341797),
-                new THREE.Vector3(1.924530029296875, 126.52765655517578, 22.822811126708984),
-                new THREE.Vector3(-10.666183471679688, 124.57829284667969, 26.132823944091797),
-                new THREE.Vector3(-15.733230590820312, 121.9059066772461, 24.206035614013672),
-                new THREE.Vector3(5.596824645996094, 124.80231475830078, 19.101726531982422),
-                new THREE.Vector3(-8.1502685546875, 126.08170318603516, 26.528087615966797),
-                new THREE.Vector3(14.784210205078125, 119.98833465576172, 9.793025970458984),
-                new THREE.Vector3(10.755401611328125, 122.07196044921875, 13.19851303100586),
-                new THREE.Vector3(7.240943908691406, 123.91021728515625, 17.081462860107422),
-                new THREE.Vector3(-11.151466369628906, 138.10520935058594, 24.20661735534668),
-                new THREE.Vector3(-5.943870544433594, 136.26954650878906, 25.32295036315918),
-                new THREE.Vector3(-0.46230316162109375, 135.47337341308594, 23.782773971557617),
-                new THREE.Vector3(4.46282958984375, 134.60675048828125, 20.484296798706055),
-                new THREE.Vector3(11.590568542480469, 126.74313354492188, 13.532483100891113),
-                new THREE.Vector3(16.50537109375, 123.81207275390625, 6.04020357131958),
-                new THREE.Vector3(18.92437744140625, 125.92546081542969, -5.66621732711792),
-                new THREE.Vector3(16.188858032226562, 126.06763458251953, -18.009464263916016),
-                new THREE.Vector3(11.750747680664062, 128.40870666503906, -28.048267364501953),
-                new THREE.Vector3(6.2244415283203125, 129.95921325683594, -34.354190826416016),
-            ];           
-    
-            this.cordConstraints = []; // To be populated
-            this.cordRestLengths = []; // To store the resting lengths of the cords
-    
-            // Automatically populate the cordConstraints array
-            this.populateCordConstraints();
-    
-            // Add a group to hold chordae lines
-            this.cordLinesGroup = new THREE.Group();
-            scene.add(this.cordLinesGroup);  // Add the group to the scene
-    
-            // visual edge mesh
-            var geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-            geometry.setIndex(edgeIds);
-            var lineMaterial = new THREE.LineBasicMaterial({color: 0x000000, linewidth: 20});
-            // var lineMaterial = new THREE.MeshPhongMaterial({color: 0xff0000, side: THREE.DoubleSide});
-            this.edgeMesh = new THREE.LineSegments(geometry, lineMaterial);
-            this.edgeMesh.visible = true;
-            scene.add(this.edgeMesh);
-    
-            // visual tri mesh
-            geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-            geometry.setIndex(mesh.faceTriIds);
-            var visMaterial = new THREE.MeshPhongMaterial({ color: 0x4C3B4D, side: THREE.FrontSide });
-            this.triMesh = new THREE.Mesh(geometry, visMaterial);
-            this.triMesh.castShadow = true;
-            this.triMesh.receiveShadow = true;
-            this.triMesh.userData = this; // for raycasting
-            this.triMesh.layers.enable(1);
-            scene.add(this.triMesh);
-            
-            var backMaterial = new THREE.MeshPhongMaterial({color: 0x6A706E, side: THREE.BackSide});
-            this.backMesh = new THREE.Mesh(geometry, backMaterial);
-            this.backMesh.userData = this;	// for raycasting
-            this.backMesh.castShadow = true;
-            this.backMesh.receiveShadow = true;
-            this.backMesh.layers.enable(1);
-            scene.add(this.backMesh);
-            geometry.computeVertexNormals();
-    
-        
-            // Create a line for each cord
-            this.cordLines = [];
-            for (let i = 0; i < this.cordConstraints.length; i++) {
-                const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-                const material = new THREE.LineBasicMaterial({ color: 0xff0000 });  // Red color for the cords
-                const line = new THREE.Line(geometry, material);
-                this.cordLinesGroup.add(line);  // Add the line to the group
-                this.cordLines.push(line);  // Store it for updating later
-            }
-            this.updateMeshes()
-        }
-    
-        // Method to remove existing bounding spheres from the scene
-        removeBoundingSpheres(scene) {
-            while (this.boundingSpheres.length > 0) {
-                const sphere = this.boundingSpheres.pop(); // Remove from the array
-                scene.remove(sphere); // Also remove from the scene
-            }
-        }
-    
-        // Method to create bounding sphere meshes for visualization
-        createBoundingSpheres(scene) {
-        // Remove any existing bounding spheres before creating new ones
-        this.removeBoundingSpheres(scene);
-    
-        // Define the default material for bounding spheres
-        const sphereGeometry = new THREE.SphereGeometry(this.boundingSphereRadius, 6, 6);
-        const sphereMaterial = new THREE.MeshBasicMaterial({ wireframe: false });  // spheres
+        // Calculate the pulsatile pressure magnitude based on a sine wave
+        const pulsatilePressure = maxPressureAmplitude * Math.sin(2 * Math.PI * pulseFrequency * time);
     
         for (let i = 0; i < this.numParticles; i++) {
-            const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone());  // Clone material for each sphere
-            const initialPosition = new THREE.Vector3(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
-            sphere.position.copy(initialPosition);
-            scene.add(sphere);
-            this.boundingSpheres.push(sphere);  // Store reference to update later
-            }
+            if (this.invMass[i] === 0.0) continue; // Skip fixed vertices
+            
+            // Apply gravity as before
+            vecAdd(this.vel, i, gravity, 0, dt);
+            
+            // Calculate the pressure force using the pulsatile pressure
+            const normal = new THREE.Vector3(
+                this.normals[i * 3],
+                this.normals[i * 3 + 1],
+                this.normals[i * 3 + 2]
+            );
+    
+            // Scale normal by pressure force: force = pressure * area * normal
+            const pressureForce = pulsatilePressure * valveArea * dt;
+            normal.multiplyScalar(pressureForce);
+            
+            // Apply this force to the velocity of each particle
+            this.vel[i * 3] += normal.x;
+            this.vel[i * 3 + 1] += normal.y;
+            this.vel[i * 3 + 2] += normal.z;
+
+            // Update position based on updated velocity
+            vecCopy(this.prevPos, i, this.pos, i);
+            vecAdd(this.pos, i, this.vel, i, dt);
         }
-    
-        updateBoundingSpheres() {
-            // Reset sphere colors before checking for collisions
-            const defaultColor = new THREE.Color(0x82968C);  // Default color
-            const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
-        
-            for (let i = 0; i < this.boundingSpheres.length; i++) {
-                const sphere = this.boundingSpheres[i];
-                sphere.position.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
-        
-                // Reset to default color before collision detection
-                sphere.material.color = defaultColor.clone();
-            }
+    }                   
+
+    solve(dt)
+    {
+        this.solveStretching(this.stretchingCompliance, dt);
+        this.solveBending(this.bendingCompliance, dt);
+        this.solveSelfCollisions();
+        this.applyCordForces(dt);
+    }
+
+    postSolve(dt)
+    {
+        for (var i = 0; i < this.numParticles; i++) {
+            if (this.invMass[i] == 0.0)
+                continue;
+            vecSetDiff(this.vel,i, this.pos,i, this.prevPos,i, 1.0 / dt);
         }
-    
-        // Method to find the closest vertex for each cord mesh point
-        populateCordConstraints() {
-            const vertexCount = this.pos.length / 3; // Number of vertices in the mesh
-    
-            for (let i = 0; i < this.meshPoints.length; i++) {
-                const meshPoint = this.meshPoints[i];
-                const fixedAnchor = this.cordAnchors[i];
-    
-                let closestVertexIndex = -1;
-                let minDistance = Infinity;
-    
-                // Iterate through all vertices to find the closest one to this mesh point
-                for (let j = 0; j < vertexCount; j++) {
-                    const vertexPos = new THREE.Vector3(
-                        this.pos[j * 3],
-                        this.pos[j * 3 + 1],
-                        this.pos[j * 3 + 2]
-                    );
-    
-                    const distance = vertexPos.distanceTo(meshPoint);
-    
-                    // Update closest vertex if this one is nearer
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        closestVertexIndex = j;
-                    }
-                }
-    
-                // After finding the closest vertex, add it to the constraints array
-                if (closestVertexIndex >= 0) {
-                    // Calculate the initial/resting length
-                    const initialDistance = fixedAnchor.distanceTo(meshPoint);
-                    
-                    // Store the constraint and its corresponding rest length
-                    this.cordConstraints.push({
-                        clothVertexIndex: closestVertexIndex,
-                        anchor: fixedAnchor
-                    });
-                    
-                    // Store the resting length for this cord
-                    this.cordRestLengths.push(initialDistance);
-                }
-            }
+        clampVelocity(this.vel, maxVelocity); // Clamp the velocity to a maximum value
+    }
+
+    solveStretching(compliance, dt) {
+        var alpha = compliance / dt /dt;
+
+        for (var i = 0; i < this.stretchingLengths.length; i++) {
+            var id0 = this.stretchingIds[2 * i];
+            var id1 = this.stretchingIds[2 * i + 1];
+            var w0 = this.invMass[id0];
+            var w1 = this.invMass[id1];
+            var w = w0 + w1;
+            if (w == 0.0)
+                continue;
+
+            vecSetDiff(this.grads,0, this.pos,id0, this.pos,id1);
+            var len = Math.sqrt(vecLengthSquared(this.grads,0));
+            if (len == 0.0)
+                continue;
+            vecScale(this.grads,0, 1.0 / len);
+            var restLen = this.stretchingLengths[i];
+            var C = len - restLen;
+            var s = -C / (w + alpha);
+            vecAdd(this.pos,id0, this.grads,0, s * w0);
+            vecAdd(this.pos,id1, this.grads,0, -s * w1);
         }
-    
-        // Full mesh self-collision detection using bounding spheres
-        solveSelfCollisions() {
-            this.hash.create(this.pos);  // Update spatial hash table with new positions
-            const boundingSphereRadius2 = this.boundingSphereRadius * this.boundingSphereRadius;
-    
-            const collisionColor = new THREE.Color(0xff0000);  // Collision color (red)
-    
-            // Loop through all particles and resolve collisions with neighbors
-            for (let i = 0; i < this.numParticles; i++) {
-                if (this.invMass[i] === 0.0) continue; // Skip fixed vertices
-    
-                // Query neighbors within the bounding sphere's radius using the spatial hash
-                this.hash.query(this.pos, i, 3 * this.boundingSphereRadius);
-    
-                for (let j = 0; j < this.hash.querySize; j++) {
-                    let otherId = this.hash.queryIds[j];
-                    if (i >= otherId) continue; // Avoid double-counting collisions
-    
-                    // Compute distance between the two particles
-                    const distSquared = vecDistSquared(this.pos, i, this.pos, otherId);
-                    if (distSquared >= boundingSphereRadius2) continue;  // No collision
-    
-                    // Collision detected: Resolve overlap by applying position correction
-                    const dist = Math.sqrt(distSquared);
-                    const overlap = this.boundingSphereRadius - dist;
-                    const invMassSum = this.invMass[i] + this.invMass[otherId];
-                    
-                    if (invMassSum === 0.0) continue;  // If both particles are fixed, skip
-                    
-                    // Calculate correction direction (normalized difference between positions)
-                    vecSetDiff(this.grads, 0, this.pos, i, this.pos, otherId);
-                    vecScale(this.grads, 0, overlap / dist);  // Scale by the overlap to resolve collision
-    
-                    // Apply position correction proportionally to the inverse masses
-                    vecAdd(this.pos, i, this.grads, 0, this.invMass[i] / invMassSum);
-                    vecAdd(this.pos, otherId, this.grads, 0, -this.invMass[otherId] / invMassSum);
-    
-                    // Collision detected: Set collision color
-                    this.boundingSpheres[i].material.color = collisionColor.clone();
-                    this.boundingSpheres[otherId].material.color = collisionColor.clone();
-                }
-            }
+    }
+
+    solveBending(compliance, dt) {
+        var alpha = compliance / dt /dt;
+
+        for (var i = 0; i < this.bendingLengths.length; i++) {
+            var id0 = this.bendingIds[4 * i + 2];
+            var id1 = this.bendingIds[4 * i + 3];
+            var w0 = this.invMass[id0];
+            var w1 = this.invMass[id1];
+            var w = w0 + w1;
+            if (w == 0.0)
+                continue;
+
+            vecSetDiff(this.grads,0, this.pos,id0, this.pos,id1);
+            var len = Math.sqrt(vecLengthSquared(this.grads,0));
+            if (len == 0.0)
+                continue;
+            vecScale(this.grads,0, 1.0 / len);
+            var restLen = this.bendingLengths[i];
+            var C = len - restLen;
+            var s = -C / (w + alpha);
+            vecAdd(this.pos,id0, this.grads,0, s * w0);
+            vecAdd(this.pos,id1, this.grads,0, -s * w1);
         }
-        
-        initClothPhysics(triIds) 
-        {
-            this.invMass.fill(0.0);
+    }
+
+    applyCordForces(dt) {
+        const kSpring = 1.0; // Spring stiffness constant
+        const stretchLimitFactor = 1.3; // Allow stretch up to 110%
     
-            var numTris = triIds.length / 3;
-            var e0 = [0.0, 0.0, 0.0];
-            var e1 = [0.0, 0.0, 0.0];
-            var c = [0.0, 0.0, 0.0];
-            var massScale = 10.0; // Adjust this value to make particles heavier or lighter
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const { clothVertexIndex, anchor } = this.cordConstraints[i];
+            const restLength = this.cordRestLengths[i]; // Get the resting length for this cord
     
-            for (var i = 0; i < numTris; i++) {
-                var id0 = triIds[3 * i];
-                var id1 = triIds[3 * i + 1];
-                var id2 = triIds[3 * i + 2];
-                vecSetDiff(e0,0, this.pos,id1, this.pos,id0);
-                vecSetDiff(e1,0, this.pos,id2, this.pos,id0);
-                vecSetCross(c,0, e0,0, e1,0);
-                var A = 0.5 * Math.sqrt(vecLengthSquared(c,0));
-                var pInvMass = A > 0.0 ? 1.0 / A / 3.0 : 0.0;
-                var pInvMass = A > 0.0 ? massScale / A / 3.0 : 0.0; // Apply massScale here
-                this.invMass[id0] += pInvMass;
-                this.invMass[id1] += pInvMass;
-                this.invMass[id2] += pInvMass;
-            }
-    
-            for (var i = 0; i < this.stretchingLengths.length; i++) {
-                var id0 = this.stretchingIds[2 * i];
-                var id1 = this.stretchingIds[2 * i + 1];
-                this.stretchingLengths[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
-            }
-    
-            for (var i = 0; i < this.bendingLengths.length; i++) {
-                var id0 = this.bendingIds[4 * i + 2];
-                var id1 = this.bendingIds[4 * i + 3];
-                this.bendingLengths[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
-            }
-    
-            // Fix vertices based on input coordinates using tolerance
-            const tol = 0.3;
-    
-            for (var i = 0; i < this.numParticles; i++) {
-                var x = this.pos[3 * i];
-                var y = this.pos[3 * i + 1];
-                var z = this.pos[3 * i + 2];
-                
-                for (var j = 0; j < this.fixedVertices.length; j++) {
-                    var fixedVertex = this.fixedVertices[j];
-                    if (Math.abs(x - fixedVertex[0]) < tol &&
-                        Math.abs(y - fixedVertex[1]) < tol &&
-                        Math.abs(z - fixedVertex[2]) < tol) {
-                        this.invMass[i] = 0.0;
-                        break;
-                    }
-                }
-            }
-        }
-    
-        preSolve(dt, gravity)
-        {
-            const flowMagnitude = this.bloodFlowForceMagnitude;
-    
-            for (var i = 0; i < this.numParticles; i++) {
-                if (this.invMass[i] == 0.0) continue;
-        
-                // Apply gravity
-                vecAdd(this.vel, i, gravity, 0, dt);
-        
-                // Use inward-pointing normal for blood flow force
-                const normal = new THREE.Vector3(
-                    this.normals[i * 3],
-                    this.normals[i * 3 + 1],
-                    this.normals[i * 3 + 2]
-                );
-        
-                // Scale normal and apply force
-                normal.multiplyScalar(flowMagnitude * dt);
-                this.vel[i * 3] += normal.x;
-                this.vel[i * 3 + 1] += normal.y;
-                this.vel[i * 3 + 2] += normal.z;
-        
-                // Update position
-                vecCopy(this.prevPos, i, this.pos, i);
-                vecAdd(this.pos, i, this.vel, i, dt);
-            }
-        }
-    
-        solve(dt)
-        {
-            this.solveStretching(this.stretchingCompliance, dt);
-            this.solveBending(this.bendingCompliance, dt);
-            this.solveSelfCollisions();
-            this.applyCordForces(dt);
-        }
-    
-        postSolve(dt)
-        {
-            for (var i = 0; i < this.numParticles; i++) {
-                if (this.invMass[i] == 0.0)
-                    continue;
-                vecSetDiff(this.vel,i, this.pos,i, this.prevPos,i, 1.0 / dt);
-            }
-            clampVelocity(this.vel, maxVelocity); // Clamp the velocity to a maximum value
-        }
-    
-        solveStretching(compliance, dt) {
-            var alpha = compliance / dt /dt;
-    
-            for (var i = 0; i < this.stretchingLengths.length; i++) {
-                var id0 = this.stretchingIds[2 * i];
-                var id1 = this.stretchingIds[2 * i + 1];
-                var w0 = this.invMass[id0];
-                var w1 = this.invMass[id1];
-                var w = w0 + w1;
-                if (w == 0.0)
-                    continue;
-    
-                vecSetDiff(this.grads,0, this.pos,id0, this.pos,id1);
-                var len = Math.sqrt(vecLengthSquared(this.grads,0));
-                if (len == 0.0)
-                    continue;
-                vecScale(this.grads,0, 1.0 / len);
-                var restLen = this.stretchingLengths[i];
-                var C = len - restLen;
-                var s = -C / (w + alpha);
-                vecAdd(this.pos,id0, this.grads,0, s * w0);
-                vecAdd(this.pos,id1, this.grads,0, -s * w1);
-            }
-        }
-    
-        solveBending(compliance, dt) {
-            var alpha = compliance / dt /dt;
-    
-            for (var i = 0; i < this.bendingLengths.length; i++) {
-                var id0 = this.bendingIds[4 * i + 2];
-                var id1 = this.bendingIds[4 * i + 3];
-                var w0 = this.invMass[id0];
-                var w1 = this.invMass[id1];
-                var w = w0 + w1;
-                if (w == 0.0)
-                    continue;
-    
-                vecSetDiff(this.grads,0, this.pos,id0, this.pos,id1);
-                var len = Math.sqrt(vecLengthSquared(this.grads,0));
-                if (len == 0.0)
-                    continue;
-                vecScale(this.grads,0, 1.0 / len);
-                var restLen = this.bendingLengths[i];
-                var C = len - restLen;
-                var s = -C / (w + alpha);
-                vecAdd(this.pos,id0, this.grads,0, s * w0);
-                vecAdd(this.pos,id1, this.grads,0, -s * w1);
-            }
-        }
-    
-        applyCordForces(dt) {
-            const kSpring = 1.0; // Spring stiffness constant
-            const stretchLimitFactor = 1.1; // Allow stretch up to 110%
-        
-            for (let i = 0; i < this.cordConstraints.length; i++) {
-                const { clothVertexIndex, anchor } = this.cordConstraints[i];
-                const restLength = this.cordRestLengths[i]; // Get the resting length for this cord
-        
-                const clothPos = new THREE.Vector3(
-                    this.pos[clothVertexIndex * 3],
-                    this.pos[clothVertexIndex * 3 + 1],
-                    this.pos[clothVertexIndex * 3 + 2]
-                );
-        
-                const diff = new THREE.Vector3().subVectors(anchor, clothPos);
-                const dist = diff.length();
-                const maxStretchLength = restLength * stretchLimitFactor; // Maximum allowed stretch
-        
-                if (dist > maxStretchLength) {
-                    // The cord has stretched beyond the allowable limit, apply constraint
-                    const correction = diff.normalize().multiplyScalar(dist - maxStretchLength);
-                    if (this.invMass[clothVertexIndex] > 0) {
-                        // Move the vertex back to the maximum stretch length position
-                        this.pos[clothVertexIndex * 3] += correction.x;
-                        this.pos[clothVertexIndex * 3 + 1] += correction.y;
-                        this.pos[clothVertexIndex * 3 + 2] += correction.z;
-                    }
-                } else {
-                    // The cord is within the allowable stretch/compression range, apply regular forces
-                    const restoringForce = diff.normalize().multiplyScalar(kSpring * (dist - restLength));
-        
-                    if (this.invMass[clothVertexIndex] > 0) {
-                        this.vel[clothVertexIndex * 3] += restoringForce.x * dt;
-                        this.vel[clothVertexIndex * 3 + 1] += restoringForce.y * dt;
-                        this.vel[clothVertexIndex * 3 + 2] += restoringForce.z * dt;
-                    }
-                }
-            }
-        }       
-    
-        updateMeshes() {
-            this.triMesh.geometry.computeVertexNormals();
-            this.triMesh.geometry.attributes.position.needsUpdate = true;
-            this.triMesh.geometry.computeBoundingSphere();
-            this.edgeMesh.geometry.attributes.position.needsUpdate = true;
-    
-            // Update bounding spheres positions
-            this.updateBoundingSpheres();
-    
-            // Update chordae lines
-            for (let i = 0; i < this.cordConstraints.length; i++) {
-                const { clothVertexIndex, anchor } = this.cordConstraints[i];
-    
-            // Get the position of the cloth vertex
             const clothPos = new THREE.Vector3(
                 this.pos[clothVertexIndex * 3],
                 this.pos[clothVertexIndex * 3 + 1],
                 this.pos[clothVertexIndex * 3 + 2]
             );
     
-            // Update the line's positions
-            const line = this.cordLines[i];
-            const positions = line.geometry.attributes.position.array;
-            positions[0] = clothPos.x;
-            positions[1] = clothPos.y;
-            positions[2] = clothPos.z;
-            positions[3] = anchor.x;
-            positions[4] = anchor.y;
-            positions[5] = anchor.z;
+            const diff = new THREE.Vector3().subVectors(anchor, clothPos);
+            const dist = diff.length();
+            const maxStretchLength = restLength * stretchLimitFactor; // Maximum allowed stretch
     
-            line.geometry.attributes.position.needsUpdate = true;  // Flag for updating the line geometry
+            if (dist > maxStretchLength) {
+                // The cord has stretched beyond the allowable limit, apply constraint
+                const correction = diff.normalize().multiplyScalar(dist - maxStretchLength);
+                if (this.invMass[clothVertexIndex] > 0) {
+                    // Move the vertex back to the maximum stretch length position
+                    this.pos[clothVertexIndex * 3] += correction.x;
+                    this.pos[clothVertexIndex * 3 + 1] += correction.y;
+                    this.pos[clothVertexIndex * 3 + 2] += correction.z;
+                }
+            } else {
+                // The cord is within the allowable stretch/compression range, apply regular forces
+                const restoringForce = diff.normalize().multiplyScalar(kSpring * (dist - restLength));
+    
+                if (this.invMass[clothVertexIndex] > 0) {
+                    this.vel[clothVertexIndex * 3] += restoringForce.x * dt;
+                    this.vel[clothVertexIndex * 3 + 1] += restoringForce.y * dt;
+                    this.vel[clothVertexIndex * 3 + 2] += restoringForce.z * dt;
+                }
+            }
         }
-    
+    }       
+
+    updateMeshes() {
+        this.triMesh.geometry.computeVertexNormals();
+        this.triMesh.geometry.attributes.position.needsUpdate = true;
+        this.triMesh.geometry.computeBoundingSphere();
+        this.edgeMesh.geometry.attributes.position.needsUpdate = true;
+
+        // Update bounding spheres positions
+        this.updateBoundingSpheres();
+
+        // Update chordae lines
+        for (let i = 0; i < this.cordConstraints.length; i++) {
+            const { clothVertexIndex, anchor } = this.cordConstraints[i];
+
+        // Get the position of the cloth vertex
+        const clothPos = new THREE.Vector3(
+            this.pos[clothVertexIndex * 3],
+            this.pos[clothVertexIndex * 3 + 1],
+            this.pos[clothVertexIndex * 3 + 2]
+        );
+
+        // Update the line's positions
+        const line = this.cordLines[i];
+        const positions = line.geometry.attributes.position.array;
+        positions[0] = clothPos.x;
+        positions[1] = clothPos.y;
+        positions[2] = clothPos.z;
+        positions[3] = anchor.x;
+        positions[4] = anchor.y;
+        positions[5] = anchor.z;
+
+        line.geometry.attributes.position.needsUpdate = true;  // Flag for updating the line geometry
+    }
+
+    }
+
+    endFrame() 
+    {
+        this.updateMeshes();
+    }
+
+    startGrab(pos) 
+    {
+        var p = [pos.x, pos.y, pos.z];
+        var minD2 = Number.MAX_VALUE;
+        this.grabId = -1;
+        for (let i = 0; i < this.numParticles; i++) {
+            var d2 = vecDistSquared(p,0, this.pos,i);
+            if (d2 < minD2) {
+                minD2 = d2;
+                this.grabId = i;
+            }
         }
-    
-        endFrame() 
-        {
-            this.updateMeshes();
+
+        if (this.grabId >= 0) {
+            this.grabInvMass = this.invMass[this.grabId];
+            this.invMass[this.grabId] = 0.0;
+            vecCopy(this.pos,this.grabId, p,0);	
         }
-    
-        startGrab(pos) 
-        {
+    }
+
+    moveGrabbed(pos, vel) 
+    {
+        if (this.grabId >= 0) {
             var p = [pos.x, pos.y, pos.z];
-            var minD2 = Number.MAX_VALUE;
-            this.grabId = -1;
-            for (let i = 0; i < this.numParticles; i++) {
-                var d2 = vecDistSquared(p,0, this.pos,i);
-                if (d2 < minD2) {
-                    minD2 = d2;
-                    this.grabId = i;
-                }
-            }
-    
-            if (this.grabId >= 0) {
-                this.grabInvMass = this.invMass[this.grabId];
-                this.invMass[this.grabId] = 0.0;
-                vecCopy(this.pos,this.grabId, p,0);	
-            }
+            vecCopy(this.pos,this.grabId, p,0);
         }
-    
-        moveGrabbed(pos, vel) 
-        {
-            if (this.grabId >= 0) {
-                var p = [pos.x, pos.y, pos.z];
-                vecCopy(this.pos,this.grabId, p,0);
-            }
-        }
-    
-        endGrab(pos, vel) 
-        {
-            if (this.grabId >= 0) {
-                this.invMass[this.grabId] = this.grabInvMass;
-                var v = [vel.x, vel.y, vel.z];
-                vecCopy(this.vel,this.grabId, v,0);
-            }
-            this.grabId = -1;
-        }								
     }
-    
-    // ------------------------------------------------------------------
-    function initPhysics() 
+
+    endGrab(pos, vel) 
     {
-        var mesh = meshes[0];
-        var fixedVertices = [
-            [35.8489990234375, 165.5010986328125, 8.134994506835938],
-            [33.99046325683594, 165.84524536132812, 12.461029052734375],
-            [31.88287353515625, 165.98385620117188, 16.668365478515625],
-            [29.40631103515625, 165.93580627441406, 20.63519287109375],
-            [26.611083984375, 165.83563232421875, 24.328033447265625],
-            [23.52923583984375, 165.61215209960938, 27.711578369140625],
-            [20.143173217773438, 165.1524658203125, 30.689239501953125],
-            [16.474853515625, 164.6180419921875, 33.22015380859375],
-            [12.570831298828125, 164.12294006347656, 35.30351257324219],
-            [8.477310180664062, 163.44752502441406, 36.839813232421875],
-            [4.29791259765625, 162.59423828125, 37.92010498046875],
-            [0.10736083984375, 161.57540893554688, 38.66584777832031],
-            [-4.0267791748046875, 160.29327392578125, 39.07496643066406],
-            [-8.085868835449219, 158.85447692871094, 39.15704345703125],
-            [-12.06256103515625, 157.37939453125, 38.89923095703125],
-            [-15.876419067382812, 155.81271362304688, 38.29374694824219],
-            [-19.431175231933594, 154.11854553222656, 37.321014404296875],
-            [-22.736083984375, 152.45375061035156, 36.05149841308594],
-            [-28.613311767578125, 149.62283325195312, 32.89787292480469],
-            [-30.891647338867188, 148.10044860839844, 31.092071533203125],
-            [-34.472007751464844, 147.7112274169922, 27.887130737304688],
-            [-37.037498474121094, 147.28842163085938, 24.834213256835938],
-            [-39.224853515625, 147.3048858642578, 21.5540771484375],
-            [-40.204620361328125, 146.58941650390625, 19.214019775390625],
-            [-40.87794494628906, 147.93304443359375, 18.13885498046875],
-            [-42.02738952636719, 148.8717498779297, 14.711761474609375],
-            [-42.75379180908203, 149.9862823486328, 11.340301513671875],
-            [-43.184783935546875, 151.21307373046875, 8.06146240234375],
-            [-43.411903381347656, 152.5615997314453, 4.8942718505859375],
-            [-43.47880554199219, 154.05404663085938, 1.8471832275390625],
-            [-43.38592529296875, 155.67588806152344, -1.0899124145507812],
-            [-43.103981018066406, 157.3496856689453, -3.9592742919921875],
-            [-42.64440155029297, 158.9791259765625, -6.816444396972656],
-            [-42.03791046142578, 160.50979614257812, -9.692619323730469],
-            [-41.331939697265625, 161.94300842285156, -12.59088134765625],
-            [-40.570526123046875, 163.28118896484375, -15.514900207519531],
-            [-39.78144073486328, 164.31710815429688, -18.544410705566406],
-            [-38.93907928466797, 164.69876098632812, -21.69805145263672],
-            [-37.940574645996094, 164.34310913085938, -24.791259765625],
-            [-36.670806884765625, 163.08273315429688, -27.500961303710938],
-            [-35.28118133544922, 161.12246704101562, -29.645545959472656],
-            [-34.04225158691406, 158.7398223876953, -31.372879028320312],
-            [-33.147796630859375, 156.24960327148438, -33.11067199707031],
-            [-32.35626220703125, 153.93209838867188, -35.07830047607422],
-            [-31.180130004882812, 151.7312774658203, -36.95598602294922],
-            [-29.73450469970703, 149.57565307617188, -38.67149353027344],
-            [-28.18079376220703, 147.43772888183594, -40.30419158935547],
-            [-26.597747802734375, 145.308349609375, -41.923614501953125],
-            [-24.971412658691406, 143.20938110351562, -43.556297302246094],
-            [-23.229736328125, 141.17027282714844, -45.17681884765625],
-            [-21.304412841796875, 139.20907592773438, -46.734527587890625],
-            [-19.169891357421875, 137.34214782714844, -48.21044158935547],
-            [-16.80113983154297, 135.61532592773438, -49.60981750488281],
-            [-14.150627136230469, 134.13323974609375, -50.930809020996094],
-            [-11.15313720703125, 133.1217803955078, -52.118499755859375],
-            [-9.255828857421875, 131.752197265625, -51.848785400390625],
-            [-6.406074523925781, 131.93399047851562, -52.38037872314453],
-            [-4.483283996582031, 133.43292236328125, -53.55690002441406],
-            [1.563018798828125, 135.43124389648438, -53.876373291015625],
-            [4.85504150390625, 136.75245666503906, -53.83094024658203],
-            [8.316253662109375, 138.1656951904297, -53.6011962890625],
-            [12.008132934570312, 139.60130310058594, -53.14928436279297],
-            [15.78485107421875, 141.12347412109375, -52.364479064941406],
-            [19.40924072265625, 142.93028259277344, -51.101783752441406],
-            [22.724990844726562, 145.03167724609375, -49.35486602783203],
-            [26.045516967773438, 146.86886596679688, -47.26177978515625],
-            [29.199081420898438, 148.5431671142578, -44.741912841796875],
-            [32.041900634765625, 150.2781219482422, -41.84491729736328],
-            [34.70074462890625, 151.8765869140625, -38.63169860839844],
-            [37.06611633300781, 153.35519409179688, -35.071998596191406],
-            [38.901885986328125, 154.89547729492188, -31.17578125],
-            [38.4107666015625, 155.25253295898438, -28.193588256835938],
-            [40.04826354980469, 156.80563354492188, -24.45201873779297],
-            [41.064208984375, 158.01466369628906, -22.75495147705078],
-            [41.45379638671875, 159.5159149169922, -18.376625061035156],
-            [41.41340637207031, 160.89849853515625, -13.942550659179688],
-            [40.90910339355469, 162.12301635742188, -9.490509033203125],
-            [40.038482666015625, 163.23983764648438, -5.060028076171875],
-            [38.9033203125, 164.22177124023438, -0.6421966552734375],
-            [37.458587646484375, 164.9376983642578, 3.7559051513671875],
-        ];
-    
-        var body = new Cloth(mesh, gThreeScene, fixedVertices);
-        gPhysicsScene.objects.push(body); 
-        document.getElementById("numTris").innerHTML = mesh.faceTriIds.length / 3;
-        document.getElementById("numVerts").innerHTML = mesh.vertices.length / 3;
+        if (this.grabId >= 0) {
+            this.invMass[this.grabId] = this.grabInvMass;
+            var v = [vel.x, vel.y, vel.z];
+            vecCopy(this.vel,this.grabId, v,0);
+        }
+        this.grabId = -1;
+    }								
+}
+
+// ------------------------------------------------------------------
+function initPhysics() 
+{
+    var mesh = meshes[0];
+    var fixedVertices = [
+        [35.8489990234375, 165.5010986328125, 8.134994506835938],
+        [33.99046325683594, 165.84524536132812, 12.461029052734375],
+        [31.88287353515625, 165.98385620117188, 16.668365478515625],
+        [29.40631103515625, 165.93580627441406, 20.63519287109375],
+        [26.611083984375, 165.83563232421875, 24.328033447265625],
+        [23.52923583984375, 165.61215209960938, 27.711578369140625],
+        [20.143173217773438, 165.1524658203125, 30.689239501953125],
+        [16.474853515625, 164.6180419921875, 33.22015380859375],
+        [12.570831298828125, 164.12294006347656, 35.30351257324219],
+        [8.477310180664062, 163.44752502441406, 36.839813232421875],
+        [4.29791259765625, 162.59423828125, 37.92010498046875],
+        [0.10736083984375, 161.57540893554688, 38.66584777832031],
+        [-4.0267791748046875, 160.29327392578125, 39.07496643066406],
+        [-8.085868835449219, 158.85447692871094, 39.15704345703125],
+        [-12.06256103515625, 157.37939453125, 38.89923095703125],
+        [-15.876419067382812, 155.81271362304688, 38.29374694824219],
+        [-19.431175231933594, 154.11854553222656, 37.321014404296875],
+        [-22.736083984375, 152.45375061035156, 36.05149841308594],
+        [-28.613311767578125, 149.62283325195312, 32.89787292480469],
+        [-30.891647338867188, 148.10044860839844, 31.092071533203125],
+        [-34.472007751464844, 147.7112274169922, 27.887130737304688],
+        [-37.037498474121094, 147.28842163085938, 24.834213256835938],
+        [-39.224853515625, 147.3048858642578, 21.5540771484375],
+        [-40.204620361328125, 146.58941650390625, 19.214019775390625],
+        [-40.87794494628906, 147.93304443359375, 18.13885498046875],
+        [-42.02738952636719, 148.8717498779297, 14.711761474609375],
+        [-42.75379180908203, 149.9862823486328, 11.340301513671875],
+        [-43.184783935546875, 151.21307373046875, 8.06146240234375],
+        [-43.411903381347656, 152.5615997314453, 4.8942718505859375],
+        [-43.47880554199219, 154.05404663085938, 1.8471832275390625],
+        [-43.38592529296875, 155.67588806152344, -1.0899124145507812],
+        [-43.103981018066406, 157.3496856689453, -3.9592742919921875],
+        [-42.64440155029297, 158.9791259765625, -6.816444396972656],
+        [-42.03791046142578, 160.50979614257812, -9.692619323730469],
+        [-41.331939697265625, 161.94300842285156, -12.59088134765625],
+        [-40.570526123046875, 163.28118896484375, -15.514900207519531],
+        [-39.78144073486328, 164.31710815429688, -18.544410705566406],
+        [-38.93907928466797, 164.69876098632812, -21.69805145263672],
+        [-37.940574645996094, 164.34310913085938, -24.791259765625],
+        [-36.670806884765625, 163.08273315429688, -27.500961303710938],
+        [-35.28118133544922, 161.12246704101562, -29.645545959472656],
+        [-34.04225158691406, 158.7398223876953, -31.372879028320312],
+        [-33.147796630859375, 156.24960327148438, -33.11067199707031],
+        [-32.35626220703125, 153.93209838867188, -35.07830047607422],
+        [-31.180130004882812, 151.7312774658203, -36.95598602294922],
+        [-29.73450469970703, 149.57565307617188, -38.67149353027344],
+        [-28.18079376220703, 147.43772888183594, -40.30419158935547],
+        [-26.597747802734375, 145.308349609375, -41.923614501953125],
+        [-24.971412658691406, 143.20938110351562, -43.556297302246094],
+        [-23.229736328125, 141.17027282714844, -45.17681884765625],
+        [-21.304412841796875, 139.20907592773438, -46.734527587890625],
+        [-19.169891357421875, 137.34214782714844, -48.21044158935547],
+        [-16.80113983154297, 135.61532592773438, -49.60981750488281],
+        [-14.150627136230469, 134.13323974609375, -50.930809020996094],
+        [-11.15313720703125, 133.1217803955078, -52.118499755859375],
+        [-9.255828857421875, 131.752197265625, -51.848785400390625],
+        [-6.406074523925781, 131.93399047851562, -52.38037872314453],
+        [-4.483283996582031, 133.43292236328125, -53.55690002441406],
+        [1.563018798828125, 135.43124389648438, -53.876373291015625],
+        [4.85504150390625, 136.75245666503906, -53.83094024658203],
+        [8.316253662109375, 138.1656951904297, -53.6011962890625],
+        [12.008132934570312, 139.60130310058594, -53.14928436279297],
+        [15.78485107421875, 141.12347412109375, -52.364479064941406],
+        [19.40924072265625, 142.93028259277344, -51.101783752441406],
+        [22.724990844726562, 145.03167724609375, -49.35486602783203],
+        [26.045516967773438, 146.86886596679688, -47.26177978515625],
+        [29.199081420898438, 148.5431671142578, -44.741912841796875],
+        [32.041900634765625, 150.2781219482422, -41.84491729736328],
+        [34.70074462890625, 151.8765869140625, -38.63169860839844],
+        [37.06611633300781, 153.35519409179688, -35.071998596191406],
+        [38.901885986328125, 154.89547729492188, -31.17578125],
+        [38.4107666015625, 155.25253295898438, -28.193588256835938],
+        [40.04826354980469, 156.80563354492188, -24.45201873779297],
+        [41.064208984375, 158.01466369628906, -22.75495147705078],
+        [41.45379638671875, 159.5159149169922, -18.376625061035156],
+        [41.41340637207031, 160.89849853515625, -13.942550659179688],
+        [40.90910339355469, 162.12301635742188, -9.490509033203125],
+        [40.038482666015625, 163.23983764648438, -5.060028076171875],
+        [38.9033203125, 164.22177124023438, -0.6421966552734375],
+        [37.458587646484375, 164.9376983642578, 3.7559051513671875],
+    ];
+
+    var body = new Cloth(mesh, gThreeScene, fixedVertices);
+    gPhysicsScene.objects.push(body); 
+    document.getElementById("numTris").innerHTML = mesh.faceTriIds.length / 3;
+    document.getElementById("numVerts").innerHTML = mesh.vertices.length / 3;
+}
+
+var timeFrames = 0;
+var timeSum = 0;	
+
+// ------------------------------------------------------------------
+function simulate() {
+    if (gPhysicsScene.paused)
+        return;
+
+    var startTime = performance.now();
+    var sdt = gPhysicsScene.dt / gPhysicsScene.numSubsteps;
+
+    // Update time
+    time += sdt;
+
+    // Determine the gravity magnitude based on the checkboxGravity state
+    var gravityMagnitude;
+    if (useSinusoidalGravity) {
+        var amplitude = 150;   // Amplitude of the sinusoidal function
+        var frequency = 2;   // Frequency 
+        gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) - 0.55 * amplitude;
+    } else {
+        gravityMagnitude = gravityConstant; // Constant gravity
     }
-    
-    var timeFrames = 0;
-    var timeSum = 0;	
-    
-    // ------------------------------------------------------------------
-    function simulate() {
-        if (gPhysicsScene.paused)
-            return;
-    
-        var startTime = performance.now();
-        var sdt = gPhysicsScene.dt / gPhysicsScene.numSubsteps;
-    
-        // Update time
-        time += sdt;
-    
-        // Determine the gravity magnitude based on the checkboxGravity state
-        var gravityMagnitude;
-        if (useSinusoidalGravity) {
-            var amplitude = 100;   // Amplitude of the sinusoidal function
-            var frequency = 5;   // Frequency 
-            gravityMagnitude = amplitude * Math.sin(2 * Math.PI * frequency * time) - 0.65 * amplitude;
-        } else {
-            gravityMagnitude = gravityConstant; // Constant gravity
-        }
-    
-        // Update gravity vector in the scene
-        gPhysicsScene.gravity = [0.0, gravityMagnitude, 0.0];
-    
-        // Initialize total force magnitude
-        let totalForceMagnitude = 0;
-    
-        // Calculate combined force for each object
-        for (let i = 0; i < gPhysicsScene.objects.length; i++) {
-            const cloth = gPhysicsScene.objects[i];
-            const bloodFlowForce = Math.abs(cloth.bloodFlowForceMagnitude);
-            totalForceMagnitude += bloodFlowForce + gravityMagnitude;
-        }
-    
-        // Update visual arrow representing gravity direction
-        gravityArrow.setDirection(new THREE.Vector3(0, Math.sign(gravityMagnitude), 0));
-        gravityArrow.setLength(Math.abs(gravityMagnitude));
-    
-        for (var step = 0; step < gPhysicsScene.numSubsteps; step++) {
-            for (var i = 0; i < gPhysicsScene.objects.length; i++)
-                gPhysicsScene.objects[i].preSolve(sdt, gPhysicsScene.gravity);
-    
-            for (var i = 0; i < gPhysicsScene.objects.length; i++) {
-                gPhysicsScene.objects[i].solve(sdt);  // Use sdt as frameDt
-            }        
-    
-            for (var i = 0; i < gPhysicsScene.objects.length; i++)
-                gPhysicsScene.objects[i].postSolve(sdt);
-        }
+
+    // Update gravity vector in the scene
+    gPhysicsScene.gravity = [0.0, gravityMagnitude, 0.0];
+
+    // Initialize total force magnitude
+    let totalForceMagnitude = 0;
+
+    // Calculate combined force for each object
+    for (let i = 0; i < gPhysicsScene.objects.length; i++) {
+        const cloth = gPhysicsScene.objects[i];
+        const bloodFlowForce = Math.abs(cloth.bloodFlowForceMagnitude);
+        totalForceMagnitude += bloodFlowForce + gravityMagnitude;
+    }
+
+    // Update visual arrow representing gravity direction
+    gravityArrow.setDirection(new THREE.Vector3(0, Math.sign(gravityMagnitude), 0));
+    gravityArrow.setLength(Math.abs(gravityMagnitude));
+
+    for (var step = 0; step < gPhysicsScene.numSubsteps; step++) {
         for (var i = 0; i < gPhysicsScene.objects.length; i++)
-            gPhysicsScene.objects[i].endFrame();
-    
-        gGrabber.increaseTime(gPhysicsScene.dt);
-    
-        var endTime = performance.now();
-        timeSum += endTime - startTime;
-        timeFrames++;
-    
-        if (timeFrames > 10) {
-            timeSum /= timeFrames;
-            document.getElementById("ms").innerHTML = timeSum.toFixed(3);
-            document.getElementById("force").innerHTML = totalForceMagnitude.toFixed(0); // Display total force
-            timeFrames = 0;
-            timeSum = 0;
-        }
+            gPhysicsScene.objects[i].preSolve(sdt, gPhysicsScene.gravity);
+
+        for (var i = 0; i < gPhysicsScene.objects.length; i++) {
+            gPhysicsScene.objects[i].solve(sdt);  // Use sdt as frameDt
+        }        
+
+        for (var i = 0; i < gPhysicsScene.objects.length; i++)
+            gPhysicsScene.objects[i].postSolve(sdt);
     }
-    
-    // ------------------------------------------
-    function initThreeScene() 
-    {
-        gThreeScene = new THREE.Scene();
-        
-        // Lights
-        
-        gThreeScene.add( new THREE.AmbientLight( 0xffffff, 1.0 ) );	
-        // gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
-    
-        var spotLight = new THREE.SpotLight( 0xffffff );
-        spotLight.angle = Math.PI / 2;
-        spotLight.penumbra = 0.2;
-        spotLight.position.set( 50, 200, 150);
-        spotLight.castShadow = true;
-        spotLight.shadow.camera.near = 3;
-        spotLight.shadow.camera.far = 10;
-        spotLight.shadow.mapSize.width = 1024;
-        spotLight.shadow.mapSize.height = 1024;
-        gThreeScene.add( spotLight );
-    
-        var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-        dirLight.position.set( 0, 150, 0 );
-        dirLight.castShadow = true;
-        dirLight.shadow.camera.near = 1;
-        dirLight.shadow.camera.far = 10;
-    
-        dirLight.shadow.camera.right = 1;
-        dirLight.shadow.camera.left = - 1;
-        dirLight.shadow.camera.top	= 1;
-        dirLight.shadow.camera.bottom = - 1;
-    
-        dirLight.shadow.mapSize.width = 1024;
-        dirLight.shadow.mapSize.height = 1024;
-        gThreeScene.add( dirLight );
-    
-        const axesHelper = new THREE.AxesHelper(150);
-        var colors = axesHelper.geometry.attributes.color;
-        colors.setXYZ(0, 1, 0, 0); // x axis red
-        colors.setXYZ(1, 1, 0, 0); // (index, R, G, B)
-        colors.setXYZ(2, 0, 1, 0); // y axis green
-        colors.setXYZ(3, 0, 1, 0);
-        colors.setXYZ(4, 0, 0, 1); // z axis blue
-        colors.setXYZ(5, 0, 0, 1);
-        
-        gThreeScene.add(axesHelper);
-        
-        // Geometry
-    
-        var ground = new THREE.Mesh(
-            new THREE.BufferGeometry( 200, 200, 1, 1 ),
-            new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
-        );				
-    
-        // ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
-        ground.receiveShadow = true;
-        gThreeScene.add( ground );
-        
-        var helper = new THREE.GridHelper( 200, 20 );
-        helper.material.opacity = 1.0;
-        helper.material.transparent = true;
-        helper.position.set(0, 0.002, 0);
-        gThreeScene.add( helper );				
-        
-        // Renderer
-    
-        gRenderer = new THREE.WebGLRenderer();
-        gRenderer.shadowMap.enabled = true;
-        gRenderer.setPixelRatio( window.devicePixelRatio );
-        gRenderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
-        window.addEventListener( 'resize', onWindowResize, false );
-        container.appendChild( gRenderer.domElement );
-        
-        // Camera
-                
-        gCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 2000);
-        gCamera.position.set(50, 200, 50);
-        gCamera.updateMatrixWorld();	
-    
-        gThreeScene.add(gCamera);
-    
-        gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
-        gCameraControl.zoomSpeed = 2.0;
-        gCameraControl.panSpeed = 0.4;
-        gCameraControl.target = new THREE.Vector3(0.0, 140, 0.0);
-        gCameraControl.update();
-    
-        // grabber
-    
-        gGrabber = new Grabber();
-        container.addEventListener( 'pointerdown', onPointer, false );
-        container.addEventListener( 'pointermove', onPointer, false );
-        container.addEventListener( 'pointerup', onPointer, false );
-    
-        // Visual arrow to represent gravity
-        gravityArrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 0), 1, 0xff0000);
-        gThreeScene.add(gravityArrow);
+    for (var i = 0; i < gPhysicsScene.objects.length; i++)
+        gPhysicsScene.objects[i].endFrame();
+
+    gGrabber.increaseTime(gPhysicsScene.dt);
+
+    var endTime = performance.now();
+    timeSum += endTime - startTime;
+    timeFrames++;
+
+    if (timeFrames > 10) {
+        timeSum /= timeFrames;
+        document.getElementById("ms").innerHTML = timeSum.toFixed(3);
+        document.getElementById("force").innerHTML = totalForceMagnitude.toFixed(0); // Display total force
+        timeFrames = 0;
+        timeSum = 0;
     }
+}
+
+// ------------------------------------------
+function initThreeScene() 
+{
+    gThreeScene = new THREE.Scene();
     
-    // ------------------------------------------------------------------
-    // Function to list all objects within the scene
-    function listSceneObjects() {
-        console.log("Scene Objects:");
-        gThreeScene.children.forEach((child, index) => {
-            console.log(`Object ${index + 1}:`, {
-                name: child.name || "Unnamed",
-                type: child.type,
-                position: child.position,
-                visible: child.visible,
-                source: child.userData.source || "Source info not available"
-            });
+    // Lights
+    
+    gThreeScene.add( new THREE.AmbientLight( 0xffffff, 2.0 ) );	
+    // gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
+
+    var spotLight = new THREE.SpotLight( 0xffffff );
+    spotLight.angle = Math.PI / 2;
+    spotLight.penumbra = 0.2;
+    spotLight.position.set( 50, 200, 150);
+    spotLight.castShadow = true;
+    spotLight.shadow.camera.near = 3;
+    spotLight.shadow.camera.far = 10;
+    spotLight.shadow.mapSize.width = 1024;
+    spotLight.shadow.mapSize.height = 1024;
+    gThreeScene.add( spotLight );
+
+    var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
+    dirLight.position.set( 0, 150, 0 );
+    dirLight.castShadow = true;
+    dirLight.shadow.camera.near = 1;
+    dirLight.shadow.camera.far = 10;
+
+    dirLight.shadow.camera.right = 1;
+    dirLight.shadow.camera.left = - 1;
+    dirLight.shadow.camera.top	= 1;
+    dirLight.shadow.camera.bottom = - 1;
+
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    gThreeScene.add( dirLight );
+
+    const axesHelper = new THREE.AxesHelper(150);
+    var colors = axesHelper.geometry.attributes.color;
+    colors.setXYZ(0, 1, 0, 0); // x axis red
+    colors.setXYZ(1, 1, 0, 0); // (index, R, G, B)
+    colors.setXYZ(2, 0, 1, 0); // y axis green
+    colors.setXYZ(3, 0, 1, 0);
+    colors.setXYZ(4, 0, 0, 1); // z axis blue
+    colors.setXYZ(5, 0, 0, 1);
+    
+    gThreeScene.add(axesHelper);
+    
+    // Geometry
+
+    var ground = new THREE.Mesh(
+        new THREE.BufferGeometry( 200, 200, 1, 1 ),
+        new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
+    );				
+
+    // ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
+    ground.receiveShadow = true;
+    gThreeScene.add( ground );
+    
+    var helper = new THREE.GridHelper( 200, 20 );
+    helper.material.opacity = 1.0;
+    helper.material.transparent = true;
+    helper.position.set(0, 0.002, 0);
+    gThreeScene.add( helper );				
+    
+    // Renderer
+
+    gRenderer = new THREE.WebGLRenderer();
+    gRenderer.shadowMap.enabled = true;
+    gRenderer.setPixelRatio( window.devicePixelRatio );
+    gRenderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
+    window.addEventListener( 'resize', onWindowResize, false );
+    container.appendChild( gRenderer.domElement );
+    
+    // Camera
+            
+    gCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 2000);
+    gCamera.position.set(50, 200, 50);
+    gCamera.updateMatrixWorld();	
+
+    gThreeScene.add(gCamera);
+
+    gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
+    gCameraControl.zoomSpeed = 2.0;
+    gCameraControl.panSpeed = 0.4;
+    gCameraControl.target = new THREE.Vector3(0.0, 140, 0.0);
+    gCameraControl.update();
+
+    // grabber
+
+    gGrabber = new Grabber();
+    container.addEventListener( 'pointerdown', onPointer, false );
+    container.addEventListener( 'pointermove', onPointer, false );
+    container.addEventListener( 'pointerup', onPointer, false );
+
+    // Visual arrow to represent gravity
+    gravityArrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 0), 1, 0xff0000);
+    gThreeScene.add(gravityArrow);
+}
+
+// ------------------------------------------------------------------
+// Function to list all objects within the scene
+function listSceneObjects() {
+    console.log("Scene Objects:");
+    gThreeScene.children.forEach((child, index) => {
+        console.log(`Object ${index + 1}:`, {
+            name: child.name || "Unnamed",
+            type: child.type,
+            position: child.position,
+            visible: child.visible,
+            source: child.userData.source || "Source info not available"
         });
+    });
+}
+
+// ------- grabber -----------------------------------------------------------
+
+class Grabber {
+    constructor() {
+        this.raycaster = new THREE.Raycaster();
+        this.raycaster.layers.set(1);
+        this.raycaster.params.Line.threshold = 0.1;
+        this.physicsObject = null;
+        this.distance = 0.0;
+        this.prevPos = new THREE.Vector3();
+        this.vel = new THREE.Vector3();
+        this.time = 0.0;
     }
-    
-    // ------- grabber -----------------------------------------------------------
-    
-    class Grabber {
-        constructor() {
-            this.raycaster = new THREE.Raycaster();
-            this.raycaster.layers.set(1);
-            this.raycaster.params.Line.threshold = 0.1;
-            this.physicsObject = null;
-            this.distance = 0.0;
-            this.prevPos = new THREE.Vector3();
-            this.vel = new THREE.Vector3();
-            this.time = 0.0;
-        }
-        increaseTime(dt) {
-            this.time += dt;
-        }
-        updateRaycaster(x, y) {
-            var rect = gRenderer.domElement.getBoundingClientRect();
-            this.mousePos = new THREE.Vector2();
-            this.mousePos.x = ((x - rect.left) / rect.width ) * 2 - 1;
-            this.mousePos.y = -((y - rect.top) / rect.height ) * 2 + 1;
-            this.raycaster.setFromCamera( this.mousePos, gCamera );
-        }
-        start(x, y) {
-            this.physicsObject = null;
-            this.updateRaycaster(x, y);
-            var intersects = this.raycaster.intersectObjects( gThreeScene.children );
-            if (intersects.length > 0) {
-                var obj = intersects[0].object.userData;
-                if (obj) {
-                    this.physicsObject = obj;
-                    this.distance = intersects[0].distance;
-                    var pos = this.raycaster.ray.origin.clone();
-                    pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-                    this.physicsObject.startGrab(pos);
-                    this.prevPos.copy(pos);
-                    this.vel.set(0.0, 0.0, 0.0);
-                    this.time = 0.0;
-                    if (gPhysicsScene.paused)
-                        run();
-                }
-            }
-        }
-        move(x, y) {
-            if (this.physicsObject) {
-                this.updateRaycaster(x, y);
+    increaseTime(dt) {
+        this.time += dt;
+    }
+    updateRaycaster(x, y) {
+        var rect = gRenderer.domElement.getBoundingClientRect();
+        this.mousePos = new THREE.Vector2();
+        this.mousePos.x = ((x - rect.left) / rect.width ) * 2 - 1;
+        this.mousePos.y = -((y - rect.top) / rect.height ) * 2 + 1;
+        this.raycaster.setFromCamera( this.mousePos, gCamera );
+    }
+    start(x, y) {
+        this.physicsObject = null;
+        this.updateRaycaster(x, y);
+        var intersects = this.raycaster.intersectObjects( gThreeScene.children );
+        if (intersects.length > 0) {
+            var obj = intersects[0].object.userData;
+            if (obj) {
+                this.physicsObject = obj;
+                this.distance = intersects[0].distance;
                 var pos = this.raycaster.ray.origin.clone();
                 pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-    
-                this.vel.copy(pos);
-                this.vel.sub(this.prevPos);
-                if (this.time > 0.0)
-                    this.vel.divideScalar(this.time);
-                else
-                    this.vel.set(0.0, 0.0, 0.0);
+                this.physicsObject.startGrab(pos);
                 this.prevPos.copy(pos);
+                this.vel.set(0.0, 0.0, 0.0);
                 this.time = 0.0;
-    
-                this.physicsObject.moveGrabbed(pos, this.vel);
+                if (gPhysicsScene.paused)
+                    run();
             }
         }
-        end(x, y) {
-            if (this.physicsObject) { 
-                this.physicsObject.endGrab(this.prevPos, this.vel);
-                this.physicsObject = null;
-            }
-        }
-    }			
-    
-    function onPointer( evt ) 
-    {
-        event.preventDefault();
-        if (evt.type == "pointerdown") {
-            gGrabber.start(evt.clientX, evt.clientY);
-            gMouseDown = true;
-            if (gGrabber.physicsObject) {
-                gCameraControl.saveState();
-                gCameraControl.enabled = false;
-            }
-        }
-        else if (evt.type == "pointermove" && gMouseDown) {
-            gGrabber.move(evt.clientX, evt.clientY);
-        }
-        else if (evt.type == "pointerup") {
-            if (gGrabber.physicsObject) {
-                gGrabber.end();
-                gCameraControl.reset();
-            }
-            gMouseDown = false;
-            gCameraControl.enabled = true;
-        }
-    }	
-    
-    // ------------------------------------------------------
-    function onWindowResize() {
-    
-        gCamera.aspect = window.innerWidth / window.innerHeight;
-        gCamera.updateProjectionMatrix();
-        gRenderer.setSize( window.innerWidth, window.innerHeight );
     }
-    
-    function run() {
-        var button = document.getElementById('buttonRun');
-        if (gPhysicsScene.paused)
-            button.innerHTML = "Stop";
-        else
-            button.innerHTML = "Run";
-        gPhysicsScene.paused = !gPhysicsScene.paused;
+    move(x, y) {
+        if (this.physicsObject) {
+            this.updateRaycaster(x, y);
+            var pos = this.raycaster.ray.origin.clone();
+            pos.addScaledVector(this.raycaster.ray.direction, this.distance);
+
+            this.vel.copy(pos);
+            this.vel.sub(this.prevPos);
+            if (this.time > 0.0)
+                this.vel.divideScalar(this.time);
+            else
+                this.vel.set(0.0, 0.0, 0.0);
+            this.prevPos.copy(pos);
+            this.time = 0.0;
+
+            this.physicsObject.moveGrabbed(pos, this.vel);
+        }
     }
-    
-    function restart() {
-        location.reload();
+    end(x, y) {
+        if (this.physicsObject) { 
+            this.physicsObject.endGrab(this.prevPos, this.vel);
+            this.physicsObject = null;
+        }
     }
-    
-    // Event Listeners for webpage inputs -----------------------------------
-    document.getElementById('checkboxEdges').addEventListener('click', function() {
-        onShowEdges();
-    });
-    
-    document.getElementById("buttonRestart").addEventListener('click', function() {
-        restart();
-    })
-    
-    document.getElementById("buttonRun").addEventListener('click', function() {
-        run();
-    })
-    
-    document.getElementById("buttonExport").addEventListener('click', function() {
-        exportCurrentMesh();
-    })
-    
-    document.getElementById('checkboxGravity').addEventListener('change', function() {
-        onGravityCheckboxChange()
-    });
-    
-    document.getElementById('checkboxBoundingSpheres').addEventListener('change', function() {
-        toggleBoundingSpheresVisibility();
-    });
-    
-    // make browser to call us repeatedly -----------------------------------
-    function update() {
-        simulate();
-        gRenderer.render(gThreeScene, gCamera);
-        requestAnimationFrame(update);
+}			
+
+function onPointer( evt ) 
+{
+    event.preventDefault();
+    if (evt.type == "pointerdown") {
+        gGrabber.start(evt.clientX, evt.clientY);
+        gMouseDown = true;
+        if (gGrabber.physicsObject) {
+            gCameraControl.saveState();
+            gCameraControl.enabled = false;
+        }
     }
+    else if (evt.type == "pointermove" && gMouseDown) {
+        gGrabber.move(evt.clientX, evt.clientY);
+    }
+    else if (evt.type == "pointerup") {
+        if (gGrabber.physicsObject) {
+            gGrabber.end();
+            gCameraControl.reset();
+        }
+        gMouseDown = false;
+        gCameraControl.enabled = true;
+    }
+}	
+
+// ------------------------------------------------------
+function onWindowResize() {
+
+    gCamera.aspect = window.innerWidth / window.innerHeight;
+    gCamera.updateProjectionMatrix();
+    gRenderer.setSize( window.innerWidth, window.innerHeight );
+}
+
+function run() {
+    var button = document.getElementById('buttonRun');
+    if (gPhysicsScene.paused)
+        button.innerHTML = "Stop";
+    else
+        button.innerHTML = "Run";
+    gPhysicsScene.paused = !gPhysicsScene.paused;
+}
+
+function restart() {
+    location.reload();
+}
+
+// Event Listeners for webpage inputs -----------------------------------
+document.getElementById('checkboxEdges').addEventListener('click', function() {
+    onShowEdges();
+});
+
+document.getElementById("buttonRestart").addEventListener('click', function() {
+    restart();
+})
+
+document.getElementById("buttonRun").addEventListener('click', function() {
+    run();
+})
+
+document.getElementById("buttonExport").addEventListener('click', function() {
+    exportCurrentMesh();
+})
+
+document.getElementById('checkboxGravity').addEventListener('change', function() {
+    onGravityCheckboxChange()
+});
+
+document.getElementById('checkboxBoundingSpheres').addEventListener('change', function() {
+    toggleBoundingSpheresVisibility();
+});
+
+// document.getElementById('checkboxShowCollisions').addEventListener('change', function() {
+//     toggleCollisionVisualization()
+// });
+
+// make browser to call us repeatedly -----------------------------------
+function update() {
+    simulate();
+    gRenderer.render(gThreeScene, gCamera);
+    requestAnimationFrame(update);
+}
     
     var meshes = [
         {

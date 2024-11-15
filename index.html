@@ -1335,7 +1335,6 @@ function simulate() {
     if (timeFrames > 10) {
         timeSum /= timeFrames;
         document.getElementById("ms").innerHTML = timeSum.toFixed(3);
-        document.getElementById("force").innerHTML = totalForceMagnitude.toFixed(0); // Display total force
         timeFrames = 0;
         timeSum = 0;
     }

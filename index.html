@@ -1588,17 +1588,9 @@ document.getElementById("buttonExport").addEventListener('click', function() {
     exportCurrentMesh();
 })
 
-document.getElementById('checkboxGravity').addEventListener('change', function() {
-    onGravityCheckboxChange()
-});
-
 document.getElementById('checkboxBoundingSpheres').addEventListener('change', function() {
     toggleBoundingSpheresVisibility();
 });
-
-// document.getElementById('checkboxShowCollisions').addEventListener('change', function() {
-//     toggleCollisionVisualization()
-// });
 
 // make browser to call us repeatedly -----------------------------------
 function update() {
